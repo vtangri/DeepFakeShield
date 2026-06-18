@@ -1,4 +1,4 @@
-# AI-4-Creativity-Project-Vanshika Tangari-DeepFakeShield
+# Final Year Project-Vanshika Tangari-DeepFakeShield
 
 ## 🛡️ DeepFakeShield AI - Multimodal Deepfake Detection Platform
 
@@ -16,7 +16,7 @@
 | ------------------ | ------------------------------------ |
 | **Student Name**   | Vanshika Tangri                      |
 | **Student Number** | 2315843                              |
-| **Project**        | Final Year Project.                  |
+| **Project**        | Final Year Project                   |
 | **Project Video**  | https://youtu.be/O3Fyx1679Cw         |
 
 ---
