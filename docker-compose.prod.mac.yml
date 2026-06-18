@@ -1,0 +1,178 @@
+# Production Docker Compose for DeepFakeShield AI (Mac/CPU Optimized)
+# Usage: docker-compose -f docker-compose.prod.mac.yml up -d
+
+services:
+  # Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    container_name: deepfakeshield-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/nginx/locations.conf:/etc/nginx/conf.d/locations.conf:ro
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./deploy/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - backend
+    restart: always
+    networks:
+      - deepfakeshield-net
+
+  # FastAPI backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: deepfakeshield-backend
+    environment:
+      - DATABASE_URL=postgresql://deepfakeshield:${DB_PASSWORD}@postgres:5432/deepfakeshield
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY}
+      - STORAGE_PATH=/data/storage
+      - VIDEO_MODEL_PATH=/models/video_forensics.pt
+      - AUDIO_MODEL_PATH=/models/audio_spoof.pt
+    volumes:
+      - storage-data:/data/storage
+      - model-data:/models:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: always
+    networks:
+      - deepfakeshield-net
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+  # Celery workers (CPU)
+  celery-default:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: deepfakeshield-celery-default
+    command: celery -A app.core.celery_app worker -Q default -c 2 --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://deepfakeshield:${DB_PASSWORD}@postgres:5432/deepfakeshield
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY}
+      - STORAGE_PATH=/data/storage
+    volumes:
+      - storage-data:/data/storage
+    depends_on:
+      - redis
+      - postgres
+    restart: always
+    networks:
+      - deepfakeshield-net
+
+  # Celery preprocess worker
+  celery-preprocess:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: deepfakeshield-celery-preprocess
+    command: celery -A app.core.celery_app worker -Q preprocess -c 4 --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://deepfakeshield:${DB_PASSWORD}@postgres:5432/deepfakeshield
+      - REDIS_URL=redis://redis:6379/0
+      - STORAGE_PATH=/data/storage
+    volumes:
+      - storage-data:/data/storage
+    depends_on:
+      - redis
+    restart: always
+    networks:
+      - deepfakeshield-net
+
+  # Celery inference worker (CPU Mode for Mac)
+  celery-inference:
+    build:
+      context: ./backend
+      # Use same prod Dockerfile as default, no GPU base needed for CPU inference
+      dockerfile: Dockerfile.prod
+    container_name: deepfakeshield-celery-inference
+    # CPU inference
+    command: celery -A app.core.celery_app worker -Q inference -c 2 --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://deepfakeshield:${DB_PASSWORD}@postgres:5432/deepfakeshield
+      - REDIS_URL=redis://redis:6379/0
+      - STORAGE_PATH=/data/storage
+      - VIDEO_MODEL_PATH=/models/video_forensics.pt
+      - AUDIO_MODEL_PATH=/models/audio_spoof.pt
+      # Force CPU mode in PyTorch if applicable via env var, though code usually checks availablity
+      - CUDA_VISIBLE_DEVICES="" 
+    volumes:
+      - storage-data:/data/storage
+      - model-data:/models:ro
+    depends_on:
+      - redis
+    restart: always
+    networks:
+      - deepfakeshield-net
+
+  # PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: deepfakeshield-postgres
+    environment:
+      - POSTGRES_USER=deepfakeshield
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=deepfakeshield
+    volumes:
+      - postgres-data-prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deepfakeshield"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: always
+    networks:
+      - deepfakeshield-net
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    container_name: deepfakeshield-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data-prod:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: always
+    networks:
+      - deepfakeshield-net
+
+  # Flower (Celery monitoring)
+  flower:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: deepfakeshield-flower
+    command: celery -A app.core.celery_app flower --port=5555
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+    restart: always
+    networks:
+      - deepfakeshield-net
+
+networks:
+  deepfakeshield-net:
+    driver: bridge
+
+volumes:
+  postgres-data-prod:
+  redis-data-prod:
+  storage-data:
+  model-data:

@@ -1,0 +1,127 @@
+name: CD — Deploy to VPS
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: vtangri/deepshield-backend
+  PROJECT_PATH: /root/deepshield
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short
+
+      - name: Build and push Backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile.vps
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare VPS Directory
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_IP }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          script: mkdir -p ${{ env.PROJECT_PATH }}
+            
+      - name: Copy config files to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_IP }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          source: "docker-compose.vps.yml,deploy/nginx/nginx.vps.conf,frontend/"
+          target: "${{ env.PROJECT_PATH }}"
+
+      - name: Execute remote commands
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_IP }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          script: |
+            cd ${{ env.PROJECT_PATH }}
+            
+            # Create .env.prod if it doesn't exist (secrets managed in GitHub)
+            cat << EOF > .env.prod
+            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            SECRET_KEY=${{ secrets.SECRET_KEY }}
+            BACKEND_IMAGE=ghcr.io/vtangri/deepshield-backend:latest
+            CORS_ORIGINS=["https://deepshield.cloud", "https://www.deepshield.cloud"]
+            FLOWER_USER=admin
+            FLOWER_PASSWORD=${{ secrets.FLOWER_PASSWORD }}
+            EOF
+            
+            # Pull latest backend image
+            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            docker compose -f docker-compose.vps.yml pull
+            
+            # Restart services (Internal port 8081)
+            docker compose -f docker-compose.vps.yml up -d --remove-orphans
+            
+            # Reload host Nginx to ensure proxy is active
+            sudo systemctl reload nginx
+            
+            # Run migrations
+            docker compose -f docker-compose.vps.yml exec -T backend alembic upgrade head
+            
+            # Clean up old images
+            docker image prune -f
+
+            # Verify API Health (Checking locally via the mapped port 8081)
+            echo "🔍 Verifying API Health..."
+            max_retries=10
+            count=0
+            while [ $count -lt $max_retries ]; do
+              if curl -s -f http://localhost:8081/health; then
+                echo "✅ API is Healthy and responding on port 8081"
+                exit 0
+              fi
+              echo "⏳ Waiting for API... ($((count+1))/$max_retries)"
+              sleep 10
+              count=$((count+1))
+            done
+            echo "❌ API failed to become healthy in time."
+            exit 1

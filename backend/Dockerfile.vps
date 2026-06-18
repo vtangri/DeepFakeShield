@@ -1,0 +1,73 @@
+# ──────────────────────────────────────────────────────────────
+# DeepFakeShield AI — Optimized Multi-Stage Production Dockerfile
+# ──────────────────────────────────────────────────────────────
+
+# Stage 1: Builder — install Python deps with build tools
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+
+# Install build-time system deps
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir gunicorn \
+    && pip install --no-cache-dir -r requirements.txt
+
+# ──────────────────────────────────────────────────────────────
+# Stage 2: Runtime — lean image, no build tools
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Runtime system deps only
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libsm6 \
+    libxext6 \
+    libgl1 \
+    libglib2.0-0 \
+    libpq5 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy installed Python packages from builder stage
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Copy application code
+COPY . .
+
+# Create non-root user + storage directory
+RUN useradd -m -u 1000 appuser \
+    && mkdir -p /data/storage \
+    && chown -R appuser:appuser /app /data
+
+USER appuser
+
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Gunicorn with UvicornWorker — 4 async workers
+CMD ["gunicorn", "app.main:app", \
+     "-w", "4", \
+     "-k", "uvicorn.workers.UvicornWorker", \
+     "-b", "0.0.0.0:8000", \
+     "--timeout", "120", \
+     "--graceful-timeout", "30", \
+     "--max-requests", "1000", \
+     "--max-requests-jitter", "50", \
+     "--access-logfile", "-", \
+     "--error-logfile", "-", \
+     "--log-level", "info"]

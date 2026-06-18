@@ -1,0 +1,260 @@
+# ══════════════════════════════════════════════════════════════
+# DeepFakeShield AI — Production VPS Docker Compose
+# Usage: docker compose -f docker-compose.vps.yml up -d
+# ══════════════════════════════════════════════════════════════
+
+version: '3.8'
+
+services:
+
+  # ────────────────────────────────────────────────────────────
+  # Nginx — Serving Frontend + Proxying Backend (Internal)
+  # ────────────────────────────────────────────────────────────
+  nginx:
+    image: nginx:alpine
+    container_name: dfs-nginx
+    ports:
+      - "127.0.0.1:8081:80"
+    volumes:
+      - ./deploy/nginx/nginx.vps.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./frontend:/usr/share/nginx/html:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - dfs-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+
+  # ────────────────────────────────────────────────────────────
+  # FastAPI Backend — Gunicorn + 4 UvicornWorkers
+  # ────────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.vps
+    image: ${BACKEND_IMAGE:-deepfakeshield-backend:latest}
+    container_name: dfs-backend
+    env_file:
+      - .env.prod
+    environment:
+      - DATABASE_URL=postgresql://deepfakeshield:${DB_PASSWORD}@postgres:5432/deepfakeshield
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - STORAGE_PATH=/data/storage
+      - DEBUG=false
+      - ENABLE_GPU=false
+    volumes:
+      - storage_data:/data/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - dfs-net
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+          cpus: '2'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # ────────────────────────────────────────────────────────────
+  # Celery — Preprocess Worker (file validation, thumbnails)
+  # ────────────────────────────────────────────────────────────
+  celery-preprocess:
+    image: ${BACKEND_IMAGE:-deepfakeshield-backend:latest}
+    container_name: dfs-celery-preprocess
+    command: >
+      celery -A app.core.celery_app worker
+      -Q preprocess
+      -c 4
+      --loglevel=info
+      --max-tasks-per-child=100
+    env_file:
+      - .env.prod
+    environment:
+      - DATABASE_URL=postgresql://deepfakeshield:${DB_PASSWORD}@postgres:5432/deepfakeshield
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - STORAGE_PATH=/data/storage
+    volumes:
+      - storage_data:/data/storage
+    depends_on:
+      - redis
+      - postgres
+      - backend
+    restart: unless-stopped
+    networks:
+      - dfs-net
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1'
+
+  # ────────────────────────────────────────────────────────────
+  # Celery — Inference Worker (ML models: ViT, Wav2Vec, SyncNet)
+  # ────────────────────────────────────────────────────────────
+  celery-inference:
+    image: ${BACKEND_IMAGE:-deepfakeshield-backend:latest}
+    container_name: dfs-celery-inference
+    command: >
+      celery -A app.core.celery_app worker
+      -Q inference
+      -c 1
+      --loglevel=info
+      --max-tasks-per-child=10
+    env_file:
+      - .env.prod
+    environment:
+      - DATABASE_URL=postgresql://deepfakeshield:${DB_PASSWORD}@postgres:5432/deepfakeshield
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - STORAGE_PATH=/data/storage
+      - ENABLE_GPU=false
+    volumes:
+      - storage_data:/data/storage
+    depends_on:
+      - redis
+      - backend
+    restart: unless-stopped
+    networks:
+      - dfs-net
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2'
+
+  # ────────────────────────────────────────────────────────────
+  # Celery — Default Worker (PDF reports, DB writes)
+  # ────────────────────────────────────────────────────────────
+  celery-default:
+    image: ${BACKEND_IMAGE:-deepfakeshield-backend:latest}
+    container_name: dfs-celery-default
+    command: >
+      celery -A app.core.celery_app worker
+      -Q default
+      -c 2
+      --loglevel=info
+    env_file:
+      - .env.prod
+    environment:
+      - DATABASE_URL=postgresql://deepfakeshield:${DB_PASSWORD}@postgres:5432/deepfakeshield
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - STORAGE_PATH=/data/storage
+    volumes:
+      - storage_data:/data/storage
+    depends_on:
+      - redis
+      - backend
+    restart: unless-stopped
+    networks:
+      - dfs-net
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  # ────────────────────────────────────────────────────────────
+  # PostgreSQL 15
+  # ────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: dfs-postgres
+    environment:
+      - POSTGRES_USER=deepfakeshield
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=deepfakeshield
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./deploy/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deepfakeshield -d deepfakeshield"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - dfs-net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # ────────────────────────────────────────────────────────────
+  # Redis 7 — Celery Broker + Result Backend
+  # ────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: dfs-redis
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save 60 1
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - dfs-net
+
+  # ────────────────────────────────────────────────────────────
+  # Flower — Celery Task Monitor (SSH tunnel access only)
+  # ────────────────────────────────────────────────────────────
+  flower:
+    image: ${BACKEND_IMAGE:-deepfakeshield-backend:latest}
+    container_name: dfs-flower
+    command: >
+      celery -A app.core.celery_app flower
+      --port=5555
+      --basic_auth=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-changeme}
+    env_file:
+      - .env.prod
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+    ports:
+      - "127.0.0.1:5555:5555"   # Localhost only — use SSH tunnel
+    depends_on:
+      - redis
+    restart: unless-stopped
+    networks:
+      - dfs-net
+
+# ════════════════════════════════════════════════════════════════
+networks:
+  dfs-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  storage_data:
+  nginx_logs:

@@ -1,0 +1,48 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# SSL certificates and private keys
+deploy/ssl/
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Logs
+*.log
+server.log
+tunnel.log
+
+# User uploads / storage
+backend/storage/
+
+# Test output
+backend/test_output*.txt
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store

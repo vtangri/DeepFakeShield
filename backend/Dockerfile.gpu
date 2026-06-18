@@ -1,0 +1,28 @@
+# GPU Dockerfile for ML inference workers
+FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
+
+WORKDIR /app
+
+# System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libsm6 \
+    libxext6 \
+    libgl1-mesa-glx \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Application code
+COPY . .
+
+# Create non-root user
+RUN useradd -m -u 1000 appuser && \
+    mkdir -p /data/storage /models && \
+    chown -R appuser:appuser /app /data /models
+USER appuser
+
+# Default: run Celery worker on inference queue
+CMD ["celery", "-A", "app.core.celery_app", "worker", "-Q", "inference", "-c", "1", "--loglevel=info"]
