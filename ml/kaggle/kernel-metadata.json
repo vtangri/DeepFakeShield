@@ -1,6 +1,6 @@
 {
-  "id": "pushparajmehta/deepfakeshield-model-training",
-  "title": "DeepFakeShield Model Training",
+  "id": "pushparajmehta/deepfakeshield-train-gpu",
+  "title": "DeepFakeShield Train GPU",
   "code_file": "kernel.ipynb",
   "language": "python",
   "kernel_type": "notebook",
