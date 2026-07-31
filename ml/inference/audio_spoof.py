@@ -165,14 +165,30 @@ class AudioSpoofService(BaseInferenceService):
                 return {"waveform": None, "raw_audio": None, "error": "Audio file not found"}
 
             if TORCH_AVAILABLE:
-                waveform, sr = torchaudio.load(str(audio_path))
-                if sr != self.sample_rate:
-                    resampler = torchaudio.transforms.Resample(sr, self.sample_rate)
-                    waveform = resampler(waveform)
-                if waveform.shape[0] > 1:
-                    waveform = waveform.mean(dim=0, keepdim=True)
+                try:
+                    waveform, sr = torchaudio.load(str(audio_path))
+                except Exception as exc:
+                    # torchaudio >= 2.9 routes load() through TorchCodec, which is
+                    # not always installed. Fall back rather than lose the modality.
+                    logger.warning("torchaudio.load failed (%s); falling back to librosa", exc)
+                    if not LIBROSA_AVAILABLE:
+                        return {
+                            "waveform": None,
+                            "raw_audio": None,
+                            "error": f"Could not decode audio: {exc}",
+                        }
+                    raw_audio_np, sr = librosa.load(
+                        str(audio_path), sr=self.sample_rate, mono=True
+                    )
+                    waveform = torch.from_numpy(raw_audio_np).float().unsqueeze(0)
+                else:
+                    if sr != self.sample_rate:
+                        resampler = torchaudio.transforms.Resample(sr, self.sample_rate)
+                        waveform = resampler(waveform)
+                    if waveform.shape[0] > 1:
+                        waveform = waveform.mean(dim=0, keepdim=True)
 
-                raw_audio_np = waveform.squeeze().numpy()
+                    raw_audio_np = waveform.squeeze().numpy()
             elif LIBROSA_AVAILABLE:
                 raw_audio_np, _ = librosa.load(str(audio_path), sr=self.sample_rate, mono=True)
             else:
