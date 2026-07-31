@@ -33,11 +33,11 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
       - STORAGE_PATH=/data/storage
-      - VIDEO_MODEL_PATH=/models/video_forensics.pt
-      - AUDIO_MODEL_PATH=/models/audio_spoof.pt
+      - VIDEO_MODEL_PATH=/models/video_forensics_final.pt
+      - AUDIO_MODEL_PATH=/models/audio_spoof_final.pt
     volumes:
       - storage-data:/data/storage
-      - model-data:/models:ro
+      - ./ml/models:/models:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -102,11 +102,11 @@ services:
       - DATABASE_URL=postgresql://deepfakeshield:${DB_PASSWORD}@postgres:5432/deepfakeshield
       - REDIS_URL=redis://redis:6379/0
       - STORAGE_PATH=/data/storage
-      - VIDEO_MODEL_PATH=/models/video_forensics.pt
-      - AUDIO_MODEL_PATH=/models/audio_spoof.pt
+      - VIDEO_MODEL_PATH=/models/video_forensics_final.pt
+      - AUDIO_MODEL_PATH=/models/audio_spoof_final.pt
     volumes:
       - storage-data:/data/storage
-      - model-data:/models:ro
+      - ./ml/models:/models:ro
     depends_on:
       - redis
     restart: always
@@ -180,4 +180,3 @@ volumes:
   postgres-data:
   redis-data:
   storage-data:
-  model-data:

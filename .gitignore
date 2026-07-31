@@ -46,3 +46,11 @@ env/
 
 # macOS
 .DS_Store
+
+# Machine Learning Large Files & Datasets
+ml/data/
+ml/models/
+backend/ml/
+*.pt
+*.pth
+*.docx

@@ -8,13 +8,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsm6 \
     libxext6 \
-    libgl1-mesa-glx \
+    libgl1 \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt gunicorn
+RUN pip install --no-cache-dir setuptools==69.5.1 wheel
+RUN pip install --no-cache-dir --no-build-isolation --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt gunicorn
 
 # Application code
 COPY . .

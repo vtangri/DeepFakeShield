@@ -635,30 +635,41 @@ function updateModalityScores(data) {
     const artifacts = video.artifacts || {};
     
     // Video Analysis
-    const videoScore = Math.round((video.score || data.overall_score || 0) * 100);
+    const hasVideo = video.score !== null && video.score !== undefined;
+    const videoScore = hasVideo ? Math.round(video.score * 100) : null;
     const videoBar = document.getElementById('videoScoreBar');
     const videoText = document.getElementById('videoScoreText');
     if (videoBar) {
-        videoBar.style.width = `${videoScore}%`;
-        videoBar.className = `score-fill ${videoScore < 30 ? 'safe' : videoScore < 70 ? 'warning' : 'danger'}`;
+        if (hasVideo) {
+            videoBar.style.width = `${videoScore}%`;
+            videoBar.className = `score-fill ${videoScore < 30 ? 'safe' : videoScore < 70 ? 'warning' : 'danger'}`;
+        } else {
+            videoBar.style.width = `0%`;
+            videoBar.className = `score-fill disabled`;
+        }
     }
-    if (videoText) videoText.textContent = `${videoScore}%`;
+    if (videoText) videoText.textContent = hasVideo ? `${videoScore}%` : 'N/A';
     
     // Video Confidence
     const videoConf = document.getElementById('videoConfidence');
-    if (videoConf) videoConf.textContent = `${Math.round((video.confidence || 0.89) * 100)}%`;
+    if (videoConf) {
+        videoConf.textContent = hasVideo && video.confidence != null ? 
+            `${Math.round(video.confidence * 100)}%` : 'N/A';
+    }
     
     // Video Details
-    setText('framesAnalyzed', video.frames_analyzed || '--');
-    setText('facesDetected', video.faces_detected || '--');
-    setText('manipulationType', video.manipulation_type || 'None');
-    setText('blendingScore', video.frame_analysis?.blending_score != null ? 
-        `${(video.frame_analysis.blending_score * 100).toFixed(1)}%` : '--');
+    setText('framesAnalyzed', hasVideo ? (video.frames_analyzed || '--') : 'N/A');
+    setText('facesDetected', hasVideo ? (video.faces_detected || '--') : 'N/A');
+    setText('manipulationType', hasVideo ? (video.manipulation_type || 'None') : 'N/A');
+    setText('blendingScore', hasVideo && video.frame_analysis?.blending_score != null ? 
+        `${(video.frame_analysis.blending_score * 100).toFixed(1)}%` : 'N/A');
     
     // Video Description
     const videoDesc = document.getElementById('videoDescription');
     if (videoDesc) {
-        if (videoScore < 30) {
+        if (!hasVideo) {
+            videoDesc.textContent = 'Video analysis not applicable for this media type.';
+        } else if (videoScore < 30) {
             videoDesc.textContent = 'No facial manipulation artifacts detected in analyzed frames.';
         } else if (videoScore < 70) {
             videoDesc.textContent = `Potential ${video.manipulation_type || 'manipulation'} detected. Manual review recommended.`;
@@ -668,40 +679,51 @@ function updateModalityScores(data) {
     }
     
     // Audio Analysis
-    const audioScore = Math.round((audio.score || (data.overall_score * 0.85) || 0) * 100);
+    const hasAudio = audio.score !== null && audio.score !== undefined;
+    const audioScore = hasAudio ? Math.round(audio.score * 100) : null;
     const audioBar = document.getElementById('audioScoreBar');
     const audioText = document.getElementById('audioScoreText');
     if (audioBar) {
-        audioBar.style.width = `${audioScore}%`;
-        audioBar.className = `score-fill ${audioScore < 30 ? 'safe' : audioScore < 70 ? 'warning' : 'danger'}`;
+        if (hasAudio) {
+            audioBar.style.width = `${audioScore}%`;
+            audioBar.className = `score-fill ${audioScore < 30 ? 'safe' : audioScore < 70 ? 'warning' : 'danger'}`;
+        } else {
+            audioBar.style.width = `0%`;
+            audioBar.className = `score-fill disabled`;
+        }
     }
-    if (audioText) audioText.textContent = `${audioScore}%`;
+    if (audioText) audioText.textContent = hasAudio ? `${audioScore}%` : 'N/A';
     
     // Audio Confidence
     const audioConf = document.getElementById('audioConfidence');
-    if (audioConf) audioConf.textContent = `${Math.round((audio.confidence || 0.87) * 100)}%`;
+    if (audioConf) {
+        audioConf.textContent = hasAudio && audio.confidence != null ? 
+            `${Math.round(audio.confidence * 100)}%` : 'N/A';
+    }
     
     // Audio Details
-    setText('voiceCloning', audio.voice_cloning_detected ? 
-        `Detected (${audio.cloning_method || 'Unknown'})` : 'Not Detected');
-    setText('mfccScore', audio.spectral_analysis?.mfcc_anomaly_score != null ?
-        `${(audio.spectral_analysis.mfcc_anomaly_score * 100).toFixed(1)}%` : '--');
-    setText('naturalness', audio.voice_identity?.naturalness_score != null ?
-        `${Math.round(audio.voice_identity.naturalness_score * 100)}%` : '--');
-    setText('formantStatus', audio.spectral_analysis?.formant_consistency || '--');
+    setText('voiceCloning', hasAudio ? (audio.voice_cloning_detected ? 
+        `Detected (${audio.cloning_method || 'Unknown'})` : 'Not Detected') : 'N/A');
+    setText('mfccScore', hasAudio && audio.spectral_analysis?.mfcc_anomaly_score != null ?
+        `${(audio.spectral_analysis.mfcc_anomaly_score * 100).toFixed(1)}%` : 'N/A');
+    setText('naturalness', hasAudio && audio.voice_identity?.naturalness_score != null ?
+        `${Math.round(audio.voice_identity.naturalness_score * 100)}%` : 'N/A');
+    setText('formantStatus', hasAudio ? (audio.spectral_analysis?.formant_consistency || '--') : 'N/A');
     
     // Linguistic Analysis
     const ling = results.linguistic_analysis || {};
     const lingPatterns = ling.suspicious_patterns || {};
     
-    setText('aiTextProb', ling.generated_text_probability ? `${Math.round(ling.generated_text_probability * 100)}%` : '--');
-    setText('templatedSpeech', lingPatterns.templated_speech ? '⚠️ Yes' : 'No');
-    setText('repetitionStatus', lingPatterns.unnatural_repetition ? '⚠️ Detected' : 'Normal');
+    setText('aiTextProb', hasAudio && ling.generated_text_probability != null ? `${Math.round(ling.generated_text_probability * 100)}%` : 'N/A');
+    setText('templatedSpeech', hasAudio ? (lingPatterns.templated_speech ? '⚠️ Yes' : 'No') : 'N/A');
+    setText('repetitionStatus', hasAudio ? (lingPatterns.unnatural_repetition ? '⚠️ Detected' : 'Normal') : 'N/A');
     
     // Audio Description
     const audioDesc = document.getElementById('audioDescription');
     if (audioDesc) {
-        if (audioScore < 30) {
+        if (!hasAudio) {
+            audioDesc.textContent = 'Audio analysis not applicable (no audio track or still image).';
+        } else if (audioScore < 30) {
             audioDesc.textContent = 'Voice patterns consistent with natural speech.';
         } else if (audioScore < 70) {
             audioDesc.textContent = 'Some audio anomalies detected in spectral analysis.';
@@ -711,32 +733,45 @@ function updateModalityScores(data) {
     }
     
     // Lip-Sync Analysis
-    const lipsyncScore = Math.round((lipsync.score || (data.overall_score * 0.7) || 0) * 100);
+    const hasLipsync = lipsync.score !== null && lipsync.score !== undefined;
+    const lipsyncScore = hasLipsync ? Math.round(lipsync.score * 100) : null;
     const lipsyncBar = document.getElementById('lipsyncScoreBar');
     const lipsyncText = document.getElementById('lipsyncScoreText');
     if (lipsyncBar) {
-        lipsyncBar.style.width = `${lipsyncScore}%`;
-        lipsyncBar.className = `score-fill ${lipsyncScore < 30 ? 'safe' : lipsyncScore < 70 ? 'warning' : 'danger'}`;
+        if (hasLipsync) {
+            lipsyncBar.style.width = `${lipsyncScore}%`;
+            lipsyncBar.className = `score-fill ${lipsyncScore < 30 ? 'safe' : lipsyncScore < 70 ? 'warning' : 'danger'}`;
+        } else {
+            lipsyncBar.style.width = `0%`;
+            lipsyncBar.className = `score-fill disabled`;
+        }
     }
-    if (lipsyncText) lipsyncText.textContent = `${lipsyncScore}%`;
+    if (lipsyncText) lipsyncText.textContent = hasLipsync ? `${lipsyncScore}%` : 'N/A';
     
     // Lip-Sync Confidence
     const lipsyncConf = document.getElementById('lipsyncConfidence');
-    if (lipsyncConf) lipsyncConf.textContent = `${Math.round((lipsync.confidence || 0.85) * 100)}%`;
+    if (lipsyncConf) {
+        lipsyncConf.textContent = hasLipsync && lipsync.confidence != null ? 
+            `${Math.round(lipsync.confidence * 100)}%` : 'N/A';
+    }
     
     // Lip-Sync Details
-    setText('syncOffset', lipsync.sync_offset_ms != null ? `${lipsync.sync_offset_ms}ms` : '--');
-    setText('correlation', lipsync.correlation_score != null ? 
-        `${(lipsync.correlation_score * 100).toFixed(1)}%` : '--');
-    setText('phonemeAccuracy', lipsync.phoneme_accuracy != null ?
-        `${Math.round(lipsync.phoneme_accuracy * 100)}%` : '--');
-    setText('visemeMatch', lipsync.viseme_match_rate != null ?
-        `${Math.round(lipsync.viseme_match_rate * 100)}%` : '--');
+    setText('syncOffset', hasLipsync && lipsync.sync_offset_ms != null ? `${lipsync.sync_offset_ms}ms` : 'N/A');
+    
+    const corrVal = lipsync.correlation !== undefined ? lipsync.correlation : lipsync.correlation_score;
+    setText('correlation', hasLipsync && corrVal != null ? 
+        `${(corrVal * 100).toFixed(1)}%` : 'N/A');
+    setText('phonemeAccuracy', hasLipsync && lipsync.phoneme_accuracy != null ?
+        `${Math.round(lipsync.phoneme_accuracy * 100)}%` : 'N/A');
+    setText('visemeMatch', hasLipsync && lipsync.viseme_match_rate != null ?
+        `${Math.round(lipsync.viseme_match_rate * 100)}%` : 'N/A');
     
     // Lip-Sync Description
     const lipsyncDesc = document.getElementById('lipsyncDescription');
     if (lipsyncDesc) {
-        if (lipsyncScore < 30) {
+        if (!hasLipsync) {
+            lipsyncDesc.textContent = 'Lip-sync analysis not applicable (requires video with audio and visible faces).';
+        } else if (lipsyncScore < 30) {
             lipsyncDesc.textContent = 'Audio-visual synchronization within normal parameters.';
         } else if (lipsyncScore < 70) {
             lipsyncDesc.textContent = `Sync offset of ${lipsync.sync_offset_ms || 'N/A'}ms detected. May indicate dubbing.`;

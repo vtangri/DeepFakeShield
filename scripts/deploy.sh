@@ -46,6 +46,11 @@ export $(grep -v '^#' .env.prod | xargs)
 echo "📁 Creating directories..."
 mkdir -p deploy/ssl storage models
 
+# Sync ML code into backend context (excluding heavy model weight directory)
+echo "🔄 Syncing ML code into backend for Docker context..."
+mkdir -p backend/ml
+rsync -a --delete --exclude 'models' ml/ backend/ml/
+
 # Generate Self-Signed SSL if missing (prevents Nginx start failure)
 if [ ! -f "deploy/ssl/cert.pem" ]; then
     echo "🔒 Generating self-signed SSL certificates..."
