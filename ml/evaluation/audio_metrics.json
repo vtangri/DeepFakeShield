@@ -1,4 +1,4 @@
 {
-  "roc_auc": 1.0,
-  "test_accuracy": 1.0
+  "roc_auc": 0.8861992764722687,
+  "test_accuracy": 0.7495361781076066
 }
