@@ -50,6 +50,7 @@ env/
 # Machine Learning Large Files & Datasets
 ml/data/
 ml/models/
+checkpoints/
 backend/ml/
 *.pt
 *.pth
