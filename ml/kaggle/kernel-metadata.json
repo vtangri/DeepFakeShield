@@ -9,7 +9,10 @@
   "machine_shape": "gpuT4x2",
   "enable_tpu": false,
   "enable_internet": true,
-  "dataset_sources": [],
+  "dataset_sources": [
+    "gradientvoyager/faceforensics-c23-extracted-faces-100k",
+    "jayjoshi37/deepfake-audio-dataset-fake-vs-real-speech"
+  ],
   "competition_sources": [],
   "kernel_sources": []
 }
