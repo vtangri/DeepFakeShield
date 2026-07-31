@@ -15,6 +15,38 @@ class BaseInferenceService(ABC):
         self.device = device
         self.model = None
         self.is_loaded = False
+
+    def find_weights(self, default_name: str) -> Optional[str]:
+        """Find model weights file across multiple possible directories."""
+        if self.model_path:
+            p = Path(self.model_path)
+            if p.exists():
+                return str(p)
+            filename = p.name
+        else:
+            filename = default_name
+
+        # Search candidates
+        candidates = [
+            Path(filename),
+            Path("../ml/models") / filename,
+            Path("ml/models") / filename,
+            Path("./ml_models") / filename,
+            Path("/models") / filename,
+            Path(__file__).parent.parent / "models" / filename,
+        ]
+
+        if self.model_path:
+            candidates.append(Path(self.model_path))
+
+        for candidate in candidates:
+            try:
+                if candidate.exists() and candidate.is_file():
+                    return str(candidate.resolve())
+            except Exception:
+                continue
+
+        return None
     
     @abstractmethod
     def load_model(self) -> None:
