@@ -38,6 +38,12 @@ class DeepfakeVideoDataset(Dataset):
         self.image_size = image_size
         
         self.samples = self._load_samples()
+        if not self.samples:
+            raise FileNotFoundError(
+                f"\n[ERROR] Dataset split '{split}' in directory '{self.data_dir}' contains 0 samples.\n"
+                f"Did you specify a placeholder path by mistake? (e.g. /path/to/...)\n"
+                f"To run training on the generated synthetic dataset, please point --data-dir to: ml/data"
+            )
     
     def _load_samples(self) -> List[Dict]:
         """Load sample list from manifest or directory structure."""
@@ -132,6 +138,12 @@ class DeepfakeAudioDataset(Dataset):
         self.max_samples = int(max_duration_sec * sample_rate)
         
         self.samples = self._load_samples()
+        if not self.samples:
+            raise FileNotFoundError(
+                f"\n[ERROR] Dataset split '{split}' in directory '{self.data_dir}' contains 0 samples.\n"
+                f"Did you specify a placeholder path by mistake? (e.g. /path/to/...)\n"
+                f"To run training on the generated synthetic dataset, please point --data-dir to: ml/data"
+            )
     
     def _load_samples(self) -> List[Dict]:
         """Load audio samples."""
