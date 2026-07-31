@@ -1,0 +1,9 @@
+{
+  "accuracy": 0.5,
+  "precision": 0.25,
+  "recall": 0.5,
+  "f1_score": 0.3333333333333333,
+  "auc": 1.0,
+  "eer": 0.0,
+  "eer_threshold": 0.5241378545761108
+}
