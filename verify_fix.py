@@ -13,9 +13,15 @@ from app.models import User, MediaItem, AnalysisJob, Report
 from app.core.config import settings
 
 async def verify_fix():
-    # Force async driver for test
-    db_url = settings.DATABASE_URL.replace("sqlite:///", "sqlite+aiosqlite:///")
+    # Use local SQLite for verification test
+    db_url = "sqlite+aiosqlite:///test_verify.db"
     engine = create_async_engine(db_url)
+    
+    # Create tables for SQLite test
+    from app.db.base import Base
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+        
     async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     
     async with async_session() as db:

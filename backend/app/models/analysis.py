@@ -1,8 +1,7 @@
 """
 Analysis job and related models.
 """
-from sqlalchemy import Column, String, Integer, Float, ForeignKey, DateTime, Text
-from sqlalchemy.dialects.postgresql import UUID, JSON
+from sqlalchemy import Column, String, Integer, Float, ForeignKey, DateTime, Text, Uuid, JSON
 from sqlalchemy.orm import relationship
 
 from app.db.base import Base
@@ -13,7 +12,7 @@ class AnalysisJob(Base):
     
     __tablename__ = "analysis_jobs"
     
-    media_id = Column(UUID(as_uuid=True), ForeignKey("media_items.id", ondelete="CASCADE"), nullable=False, index=True)
+    media_id = Column(Uuid, ForeignKey("media_items.id", ondelete="CASCADE"), nullable=False, index=True)
     
     # Status
     status = Column(String(50), default="PENDING", nullable=False, index=True)
@@ -22,7 +21,7 @@ class AnalysisJob(Base):
     error_message = Column(Text, nullable=True)
     
     # Options
-    options = Column(JSON, default={})
+    options = Column(JSON, default=dict)
     
     # Results
     results = Column(JSON, nullable=True)
@@ -49,7 +48,7 @@ class Segment(Base):
     
     __tablename__ = "segments"
     
-    job_id = Column(UUID(as_uuid=True), ForeignKey("analysis_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    job_id = Column(Uuid, ForeignKey("analysis_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
     
     # Time range
     start_ms = Column(Integer, nullable=False)
@@ -61,7 +60,7 @@ class Segment(Base):
     reason = Column(String(255), nullable=False)
     
     # Additional data
-    meta_info = Column(JSON, default={})
+    meta_info = Column(JSON, default=dict)
     
     # Relationships
     analysis_job = relationship("AnalysisJob", back_populates="segments")
@@ -72,7 +71,7 @@ class ModelRun(Base):
     
     __tablename__ = "model_runs"
     
-    job_id = Column(UUID(as_uuid=True), ForeignKey("analysis_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    job_id = Column(Uuid, ForeignKey("analysis_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
     
     # Model info
     model_name = Column(String(100), nullable=False)

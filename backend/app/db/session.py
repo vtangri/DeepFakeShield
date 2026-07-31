@@ -11,7 +11,6 @@ from app.core.config import settings
 
 
 # Sync engine for Alembic migrations
-print(f"DEBUG: settings.DATABASE_URL={settings.DATABASE_URL}")
 db_url = settings.DATABASE_URL
 if db_url.startswith("postgresql://"):
     db_url = db_url.replace("postgresql://", "postgresql+psycopg2://")
@@ -70,3 +69,22 @@ async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
             yield session
         finally:
             await session.close()
+
+
+def update_job_status(job_id: str, stage: str, progress: float, error: str = None):
+    """Update job status in database (for Celery workers)."""
+    from app.models.analysis import AnalysisJob
+    from app.core import TaskState
+    db = SessionLocal()
+    try:
+        job = db.query(AnalysisJob).filter(AnalysisJob.id == job_id).first()
+        if job:
+            job.stage = stage
+            job.status = stage
+            job.progress = progress
+            if error:
+                job.error_message = error
+                job.status = TaskState.FAILED
+            db.commit()
+    finally:
+        db.close()

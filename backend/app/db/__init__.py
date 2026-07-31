@@ -7,6 +7,7 @@ from .session import (
     AsyncSessionLocal,
     get_db,
     get_async_db,
+    update_job_status,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "AsyncSessionLocal",
     "get_db",
     "get_async_db",
+    "update_job_status",
 ]

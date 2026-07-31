@@ -10,25 +10,8 @@ from celery import shared_task
 
 from app.core.celery_app import celery_app, TaskState
 from app.core.config import settings
-from app.db.session import SessionLocal
+from app.db import SessionLocal, update_job_status
 from app.models import AnalysisJob, Report
-
-
-def update_job_status(job_id: str, stage: str, progress: float, error: str = None):
-    """Update job status in database."""
-    db = SessionLocal()
-    try:
-        job = db.query(AnalysisJob).filter(AnalysisJob.id == job_id).first()
-        if job:
-            job.stage = stage
-            job.status = stage
-            job.progress = progress
-            if error:
-                job.error_message = error
-                job.status = TaskState.FAILED
-            db.commit()
-    finally:
-        db.close()
 
 
 # LLM System Prompt for Report Generation
@@ -86,9 +69,10 @@ def _generate_fallback_report(results: Dict[str, Any]) -> str:
     """Generate a fallback report without LLM."""
     overall_score = results.get("overall_score", 0)
     label = results.get("label", "UNKNOWN")
-    video_score = results.get("video_score", 0)
-    audio_score = results.get("audio_score", 0)
-    lipsync_score = results.get("lipsync_score", 0)
+    video_score = results.get("video_score")
+    audio_score = results.get("audio_score")
+    lipsync_score = results.get("lipsync_score")
+    active_modalities = results.get("active_modalities", [])
     
     # Determine verdict text
     if label == "AUTHENTIC":
@@ -97,9 +81,27 @@ def _generate_fallback_report(results: Dict[str, Any]) -> str:
     elif label == "LIKELY_FAKE":
         verdict = "This media shows some indicators of potential manipulation."
         confidence = "medium"
-    else:
+    elif label == "FAKE":
         verdict = "This media shows strong indicators of manipulation."
         confidence = "high"
+    else:
+        verdict = "This media shows some anomalies that warrant further review."
+        confidence = "medium"
+    
+    # Format scores, showing N/A for skipped modalities
+    video_line = f"- **Score:** {video_score:.1%}" if video_score is not None else "- **Score:** N/A (not applicable for this media type)"
+    audio_line = f"- **Score:** {audio_score:.1%}" if audio_score is not None else "- **Score:** N/A (no audio track detected)"
+    lipsync_line = f"- **Score:** {lipsync_score:.1%}" if lipsync_score is not None else "- **Score:** N/A (requires both audio and visible faces)"
+    
+    video_detail = ("No significant anomalies detected" if video_score is not None and video_score < 0.5 
+                    else "Potential manipulation indicators found" if video_score is not None
+                    else "Video analysis was not performed")
+    audio_detail = ("Audio appears authentic" if audio_score is not None and audio_score < 0.5
+                    else "Audio shows potential synthesis patterns" if audio_score is not None
+                    else "No audio track was present in the media")
+    lipsync_detail = ("Lip movements align with audio" if lipsync_score is not None and lipsync_score < 0.5
+                     else "Potential lip-sync mismatch detected" if lipsync_score is not None
+                     else "Lip-sync analysis requires both audio and video with visible faces")
     
     report = f"""# DeepFakeShield Analysis Report
 
@@ -110,23 +112,24 @@ def _generate_fallback_report(results: Dict[str, Any]) -> str:
 **Overall Suspicion Score:** {overall_score:.1%}
 **Classification:** {label}
 **Confidence:** {confidence}
+**Modalities Analyzed:** {', '.join(active_modalities) if active_modalities else 'None'}
 
 ## Modality Analysis
 
 ### Video Analysis
-- **Score:** {video_score:.1%}
+{video_line}
 - Analyzed video frames for manipulation artifacts
-- {"No significant anomalies detected" if video_score < 0.5 else "Potential manipulation indicators found"}
+- {video_detail}
 
 ### Audio Analysis  
-- **Score:** {audio_score:.1%}
+{audio_line}
 - Analyzed audio for synthetic speech markers
-- {"Audio appears authentic" if audio_score < 0.5 else "Audio shows potential synthesis patterns"}
+- {audio_detail}
 
 ### Lip-Sync Analysis
-- **Score:** {lipsync_score:.1%}
+{lipsync_line}
 - Verified audio-visual synchronization
-- {"Lip movements align with audio" if lipsync_score < 0.5 else "Potential lip-sync mismatch detected"}
+- {lipsync_detail}
 
 ## Limitations
 
@@ -136,6 +139,7 @@ def _generate_fallback_report(results: Dict[str, Any]) -> str:
 2. Results should be considered alongside other evidence
 3. Detection performance may vary with compression and quality
 4. Novel deepfake techniques may not be detected
+5. Modalities marked N/A were not analyzed due to media properties
 
 ## Recommended Next Steps
 
@@ -152,7 +156,7 @@ def _generate_fallback_report(results: Dict[str, Any]) -> str:
 
 
 @celery_app.task(bind=True, queue="default", max_retries=3)
-def generate_report(self, job_id: str, fusion_results: Dict[str, Any]) -> Dict[str, Any]:
+def generate_report(self, fusion_results: Dict[str, Any], job_id: str) -> Dict[str, Any]:
     """Generate the final forensic report."""
     try:
         update_job_status(job_id, TaskState.REPORT, 0.0)
@@ -210,7 +214,7 @@ def generate_report(self, job_id: str, fusion_results: Dict[str, Any]) -> Dict[s
 
 
 @celery_app.task(bind=True, queue="default")
-def finalize_job(self, job_id: str, report_result: Dict[str, Any]) -> Dict[str, Any]:
+def finalize_job(self, report_result: Dict[str, Any], job_id: str) -> Dict[str, Any]:
     """Finalize the analysis job."""
     try:
         from datetime import datetime
@@ -239,26 +243,27 @@ def finalize_job(self, job_id: str, report_result: Dict[str, Any]) -> Dict[str, 
 
 @celery_app.task(bind=True, queue="default")
 def run_full_pipeline(self, job_id: str):
-    """Run the complete analysis pipeline."""
+    """Run the complete analysis pipeline using a Celery canvas chain (non-blocking)."""
     from app.workers.preprocess import run_preprocessing_pipeline
     from app.workers.inference import run_inference_pipeline
+    from celery import chain
     
     try:
-        # Run preprocessing
-        preprocess_results = run_preprocessing_pipeline.apply(args=[job_id]).get()
+        # Build non-blocking pipeline chain. Task args are swapped on downstream tasks so chain piped inputs match:
+        # 1. run_preprocessing_pipeline(job_id) -> returns preprocess_results
+        # 2. run_inference_pipeline(preprocess_results, job_id) -> returns fusion_results
+        # 3. generate_report(fusion_results, job_id) -> returns report_result
+        # 4. finalize_job(report_result, job_id) -> returns final_result
+        pipeline = chain(
+            run_preprocessing_pipeline.s(job_id),
+            run_inference_pipeline.s(job_id),
+            generate_report.s(job_id),
+            finalize_job.s(job_id)
+        )
         
-        # Run inference
-        inference_results = run_inference_pipeline.apply(
-            args=[job_id, preprocess_results]
-        ).get()
-        
-        # Generate report
-        report_result = generate_report.apply(args=[job_id, inference_results]).get()
-        
-        # Finalize
-        final_result = finalize_job.apply(args=[job_id, report_result]).get()
-        
-        return final_result
+        # Dispatch the chained pipeline asynchronously
+        pipeline.apply_async()
+        return {"job_id": job_id, "status": "QUEUED"}
         
     except Exception as e:
         update_job_status(job_id, TaskState.FAILED, 0.0, str(e))

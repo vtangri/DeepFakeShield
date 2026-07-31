@@ -14,25 +14,8 @@ import numpy as np
 
 from app.core.celery_app import celery_app, TaskState
 from app.core.config import settings
-from app.db.session import SessionLocal
+from app.db import SessionLocal, update_job_status
 from app.models import AnalysisJob, MediaItem
-
-
-def update_job_status(job_id: str, stage: str, progress: float, error: str = None):
-    """Update job status in database."""
-    db = SessionLocal()
-    try:
-        job = db.query(AnalysisJob).filter(AnalysisJob.id == job_id).first()
-        if job:
-            job.stage = stage
-            job.status = stage
-            job.progress = progress
-            if error:
-                job.error_message = error
-                job.status = TaskState.FAILED
-            db.commit()
-    finally:
-        db.close()
 
 
 @celery_app.task(bind=True, queue="preprocess", max_retries=3)
@@ -144,7 +127,11 @@ def extract_frames(self, job_id: str, file_path: str, fps: int = 5) -> Dict[str,
 
 @celery_app.task(bind=True, queue="preprocess", max_retries=3)
 def extract_audio(self, job_id: str, file_path: str) -> Dict[str, Any]:
-    """Extract audio track from video/audio file."""
+    """Extract audio track from video/audio file.
+    
+    Returns has_audio=False if the media has no audio track, instead of
+    failing. This allows downstream tasks to skip audio analysis.
+    """
     try:
         update_job_status(job_id, TaskState.EXTRACTING, 0.5)
         
@@ -163,19 +150,42 @@ def extract_audio(self, job_id: str, file_path: str) -> Dict[str, Any]:
         ]
         
         result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise ValueError(f"ffmpeg error: {result.stderr}")
+        
+        # Check if audio was actually extracted
+        # ffmpeg may succeed but produce an empty/tiny file if no audio track exists
+        has_audio = (
+            result.returncode == 0
+            and audio_path.exists()
+            and audio_path.stat().st_size > 1000  # > 1KB means real audio data
+        )
+        
+        if not has_audio:
+            # No audio track in this media — this is NOT an error
+            update_job_status(job_id, TaskState.EXTRACTING, 1.0)
+            return {
+                "job_id": job_id,
+                "audio_path": None,
+                "has_audio": False,
+                "note": "No audio track detected in media file",
+            }
         
         update_job_status(job_id, TaskState.EXTRACTING, 1.0)
         
         return {
             "job_id": job_id,
             "audio_path": str(audio_path),
+            "has_audio": True,
         }
         
     except Exception as e:
-        update_job_status(job_id, TaskState.FAILED, 0.0, str(e))
-        raise
+        # ffmpeg failure is not fatal — just means no audio analysis
+        update_job_status(job_id, TaskState.EXTRACTING, 1.0)
+        return {
+            "job_id": job_id,
+            "audio_path": None,
+            "has_audio": False,
+            "note": f"Audio extraction failed: {str(e)}",
+        }
 
 
 @celery_app.task(bind=True, queue="preprocess", max_retries=3)
@@ -236,7 +246,13 @@ def transcribe_audio(self, job_id: str, audio_path: str) -> Dict[str, Any]:
 
 @celery_app.task(bind=True, queue="preprocess")
 def run_preprocessing_pipeline(self, job_id: str):
-    """Run the full preprocessing pipeline."""
+    """Run the full preprocessing pipeline.
+    
+    Handles three media types:
+    - video: extract frames + attempt audio extraction + transcription
+    - audio: transcription only
+    - image: single-frame analysis only (no audio, no lip-sync)
+    """
     try:
         # Validate
         validation = validate_media.apply(args=[job_id]).get()
@@ -244,29 +260,50 @@ def run_preprocessing_pipeline(self, job_id: str):
         file_path = validation["file_path"]
         media_type = validation["media_type"]
         
-        results = {"job_id": job_id}
+        results = {"job_id": job_id, "media_type": media_type}
         
         if media_type == "video":
             # Extract frames
             frames_result = extract_frames.apply(args=[job_id, file_path]).get()
             results["frames"] = frames_result
             
-            # Extract audio
+            # Extract audio (may return has_audio=False if no audio track)
             audio_result = extract_audio.apply(args=[job_id, file_path]).get()
             results["audio"] = audio_result
             
-            # Transcribe
-            transcript_result = transcribe_audio.apply(
-                args=[job_id, audio_result["audio_path"]]
-            ).get()
-            results["transcript"] = transcript_result["transcript"]
+            # Only transcribe if audio was actually found
+            if audio_result.get("has_audio") and audio_result.get("audio_path"):
+                transcript_result = transcribe_audio.apply(
+                    args=[job_id, audio_result["audio_path"]]
+                ).get()
+                results["transcript"] = transcript_result["transcript"]
+            else:
+                results["transcript"] = {"full_text": "", "words": []}
             
         elif media_type == "audio":
-            # Transcribe directly
+            # Audio-only: transcribe directly
+            results["audio"] = {"audio_path": file_path, "has_audio": True}
             transcript_result = transcribe_audio.apply(args=[job_id, file_path]).get()
             results["transcript"] = transcript_result["transcript"]
+            results["frames"] = {"frames": [], "frame_count": 0}
+            
+        elif media_type == "image":
+            # Image: single frame, no audio, no lip-sync
+            results["frames"] = {
+                "frames": [{"path": file_path, "timestamp_ms": 0, "frame_number": 0}],
+                "frame_count": 1,
+            }
+            results["audio"] = {"audio_path": None, "has_audio": False, "note": "Image media — no audio"}
+            results["transcript"] = {"full_text": "", "words": []}
+            
+        else:
+            # Unknown media type — try video processing
+            frames_result = extract_frames.apply(args=[job_id, file_path]).get()
+            results["frames"] = frames_result
+            results["audio"] = {"audio_path": None, "has_audio": False}
+            results["transcript"] = {"full_text": "", "words": []}
         
-        # Update job with results
+        # Update job with preprocessing results
         db = SessionLocal()
         try:
             job = db.query(AnalysisJob).filter(AnalysisJob.id == job_id).first()

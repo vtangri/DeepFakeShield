@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     
     # ML Models
     ML_MODELS_PATH: str = "../ml/models"
+    VIDEO_MODEL_PATH: Optional[str] = "../ml/models/video_forensics_final.pt"
+    AUDIO_MODEL_PATH: Optional[str] = "../ml/models/audio_spoof_final.pt"
     VIDEO_MODEL_VERSION: str = "v1.0.0"
     AUDIO_MODEL_VERSION: str = "v1.0.0"
     FUSION_MODEL_VERSION: str = "v1.0.0"

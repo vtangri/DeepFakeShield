@@ -57,17 +57,28 @@ async def generate_report(
     report = result.scalar_one_or_none()
     
     if not report:
-        # Create new report
         report = Report(
             job_id=job_id,
             generated_at=datetime.utcnow()
         )
         db.add(report)
+        
+    from app.workers.report import generate_report_with_llm
     
-    # TODO: Call LLM service to generate report
-    # For now, generate a placeholder report
-    report.summary = _generate_placeholder_summary(job)
-    report.full_report = _generate_placeholder_full_report(job)
+    # Construct results dict for the LLM
+    analysis_results = {
+        "overall_score": job.overall_score,
+        "label": job.label,
+        "video_score": job.results.get("video", {}).get("video_score", 0.0) if job.results else 0.0,
+        "audio_score": job.results.get("audio", {}).get("audio_score", 0.0) if job.results else 0.0,
+        "lipsync_score": job.results.get("lipsync", {}).get("lipsync_score", 0.0) if job.results else 0.0,
+    }
+    
+    report.summary = generate_report_with_llm(analysis_results)
+    
+    full_report = _generate_placeholder_full_report(job)
+    full_report["report_text"] = report.summary
+    report.full_report = full_report
     report.generated_at = datetime.utcnow()
     
     await db.commit()

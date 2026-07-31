@@ -4,9 +4,10 @@ Media upload and management routes.
 import os
 import hashlib
 import aiofiles
+import filetype
 from pathlib import Path
-from uuid import uuid4
-from datetime import datetime, timedelta
+from uuid import uuid4, UUID
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
@@ -58,13 +59,6 @@ async def upload_media(
     db: AsyncSession = Depends(get_async_db)
 ):
     """Upload a media file for analysis."""
-    # Validate file type
-    if file.content_type not in ALLOWED_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File type {file.content_type} not allowed. Allowed types: video, audio, image"
-        )
-    
     # Check file size
     file.file.seek(0, 2)  # Seek to end
     file_size = file.file.tell()
@@ -76,6 +70,18 @@ async def upload_media(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"File too large. Maximum size: {settings.UPLOAD_MAX_SIZE_MB}MB"
         )
+        
+    # Read the first 2048 bytes for content verification
+    first_chunk = await file.read(2048)
+    kind = filetype.guess(first_chunk)
+    guessed_mime = kind.mime if kind else file.content_type
+    
+    # Enforce content-based validation
+    if guessed_mime not in ALLOWED_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File type {guessed_mime} not allowed. Allowed types: video, audio, image"
+        )
     
     # Create storage directory
     storage_dir = Path(settings.STORAGE_PATH) / str(current_user.id)
@@ -86,10 +92,11 @@ async def upload_media(
     unique_filename = f"{uuid4()}{file_ext}"
     file_path = storage_dir / unique_filename
     
-    # Save file
+    # Save file in streaming chunks (prevent OOM)
     async with aiofiles.open(file_path, "wb") as f:
-        content = await file.read()
-        await f.write(content)
+        await f.write(first_chunk)
+        while chunk := await file.read(1024 * 64):
+            await f.write(chunk)
     
     # Compute hash
     sha256 = await compute_sha256(str(file_path))
@@ -116,7 +123,7 @@ async def upload_media(
         )
     
     # Determine media type
-    media_type = get_media_type(file.content_type)
+    media_type = get_media_type(guessed_mime)
     
     # Create media item
     media_item = MediaItem(
@@ -126,9 +133,9 @@ async def upload_media(
         sha256=sha256,
         file_size=file_size,
         media_type=media_type,
-        mime_type=file.content_type,
+        mime_type=guessed_mime,
         storage_path=str(file_path),
-        expires_at=datetime.utcnow() + timedelta(days=30)  # 30-day retention
+        expires_at=datetime.now(timezone.utc) + timedelta(days=30)  # 30-day retention
     )
     
     db.add(media_item)
@@ -148,7 +155,7 @@ async def upload_media(
 
 @router.get("/{media_id}", response_model=MediaItemResponse)
 async def get_media(
-    media_id: str,
+    media_id: UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db)
 ):

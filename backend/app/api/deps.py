@@ -70,7 +70,7 @@ async def get_current_superuser(
     return current_user
 
 
-def get_optional_user(
+async def get_optional_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(
         HTTPBearer(auto_error=False)
     ),
@@ -83,6 +83,18 @@ def get_optional_user(
     token_data = decode_token(credentials.credentials)
     if token_data is None:
         return None
+        
+    try:
+        user_uuid = UUID(token_data.user_id)
+    except ValueError:
+        return None
+
+    result = await db.execute(
+        select(User).where(User.id == user_uuid)
+    )
+    user = result.scalar_one_or_none()
     
-    # Note: This is sync - would need async version for production
-    return None  # Placeholder - need async implementation
+    if user is None or not user.is_active:
+        return None
+        
+    return user

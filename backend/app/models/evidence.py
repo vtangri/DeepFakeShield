@@ -1,8 +1,7 @@
 """
 Evidence and Report models.
 """
-from sqlalchemy import Column, String, ForeignKey, DateTime, Text
-from sqlalchemy.dialects.postgresql import UUID, JSON
+from sqlalchemy import Column, String, ForeignKey, DateTime, Text, Uuid, JSON
 from sqlalchemy.orm import relationship
 
 from app.db.base import Base
@@ -13,7 +12,7 @@ class EvidenceArtifact(Base):
     
     __tablename__ = "evidence_artifacts"
     
-    job_id = Column(UUID(as_uuid=True), ForeignKey("analysis_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    job_id = Column(Uuid, ForeignKey("analysis_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
     
     # Artifact type
     artifact_type = Column(String(50), nullable=False)  # heatmap, spectrogram, mouth_roi, frame
@@ -26,7 +25,7 @@ class EvidenceArtifact(Base):
     storage_path = Column(String(500), nullable=False)
     
     # Metadata
-    meta_info = Column(JSON, default={})
+    meta_info = Column(JSON, default=dict)
     
     # Relationships
     analysis_job = relationship("AnalysisJob", back_populates="evidence_artifacts")
@@ -37,7 +36,7 @@ class Report(Base):
     
     __tablename__ = "reports"
     
-    job_id = Column(UUID(as_uuid=True), ForeignKey("analysis_jobs.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    job_id = Column(Uuid, ForeignKey("analysis_jobs.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
     
     # Report content
     summary = Column(Text, nullable=True)
@@ -62,15 +61,15 @@ class AuditLog(Base):
     
     __tablename__ = "audit_logs"
     
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     
     # Action info
     action = Column(String(100), nullable=False)
     resource_type = Column(String(50), nullable=True)
-    resource_id = Column(UUID(as_uuid=True), nullable=True)
+    resource_id = Column(Uuid, nullable=True)
     
     # Details
-    details = Column(JSON, default={})
+    details = Column(JSON, default=dict)
     
     # IP info
     ip_address = Column(String(50), nullable=True)

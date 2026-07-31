@@ -1,7 +1,7 @@
 """
 Analysis job routes.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 from typing import List
 
@@ -22,8 +22,10 @@ from app.schemas import (
     ModelRunResponse,
 )
 from app.api.deps import get_current_user
-from fastapi import BackgroundTasks
-from app.services.simulation import simulate_analysis_pipeline
+from app.workers import run_full_pipeline
+import structlog
+
+logger = structlog.get_logger()
 
 
 router = APIRouter(prefix="/analysis", tags=["Analysis"])
@@ -32,7 +34,6 @@ router = APIRouter(prefix="/analysis", tags=["Analysis"])
 @router.post("/start", response_model=AnalysisStartResponse, status_code=status.HTTP_201_CREATED)
 async def start_analysis(
     request: AnalysisStartRequest,
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db)
 ):
@@ -47,7 +48,6 @@ async def start_analysis(
     media_item = result.scalar_one_or_none()
     
     if not media_item:
-        print(f"DEBUG: Media item not found or unauthorized for id={request.media_id}, user_id={current_user.id}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Media item not found"
@@ -80,18 +80,15 @@ async def start_analysis(
         status=TaskState.PENDING,
         stage=TaskState.PENDING,
         options=options,
-        started_at=datetime.utcnow()
+        started_at=datetime.now(timezone.utc)
     )
     
     db.add(job)
     await db.commit()
     await db.refresh(job)
     
-    # Trigger Simulation Task (Temporary until Celery is fully configured)
-    background_tasks.add_task(simulate_analysis_pipeline, job.id)
-    
-    # from app.workers.preprocess import run_analysis_pipeline
-    # run_analysis_pipeline.delay(str(job.id))
+    # Trigger true Celery pipeline asynchronously
+    run_full_pipeline.delay(str(job.id))
     
     return AnalysisStartResponse(
         job_id=job.id,
@@ -119,13 +116,13 @@ async def get_analysis_status(
     job = result.scalar_one_or_none()
     
     if not job:
-        print(f"DEBUG: Job not found with id={job_id}")
+        logger.warning("Analysis job not found", job_id=str(job_id))
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Analysis job not found"
         )
     
-    print(f"DEBUG: Found job id={job_id}, stage={job.stage}, status={job.status}")
+    logger.info("Found analysis job", job_id=str(job_id), stage=job.stage, status=job.status)
     
     return AnalysisStatusResponse(
         job_id=job.id,

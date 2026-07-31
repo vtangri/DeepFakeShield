@@ -1,8 +1,7 @@
 """
 Media item model for uploaded files.
 """
-from sqlalchemy import Column, String, Integer, ForeignKey, DateTime, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID, JSON
+from sqlalchemy import Column, String, Integer, ForeignKey, DateTime, Text, UniqueConstraint, Uuid, JSON
 from sqlalchemy.orm import relationship
 
 from app.db.base import Base
@@ -13,7 +12,7 @@ class MediaItem(Base):
     
     __tablename__ = "media_items"
     
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     
     # File info
     filename = Column(String(255), nullable=False)
@@ -33,7 +32,7 @@ class MediaItem(Base):
     thumbnail_path = Column(String(500), nullable=True)
     
     # Metadata
-    meta_info = Column(JSON, default={})
+    meta_info = Column(JSON, default=dict)
     
     # Retention
     expires_at = Column(DateTime, nullable=True)
