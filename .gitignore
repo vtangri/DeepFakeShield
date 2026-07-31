@@ -55,3 +55,6 @@ backend/ml/
 *.pt
 *.pth
 *.docx
+
+# Kaggle kernel outputs (downloaded artifacts)
+ml/kaggle/output/
