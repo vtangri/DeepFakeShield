@@ -63,6 +63,29 @@ case "${1:-run}" in
     done < <(find "$OUTPUT_DIR" -name '*.pt' -type f)
     [ "$found" -eq 1 ] || echo "[WARNING] No .pt weights found in kernel output."
 
+    # Older kernel versions named the audio layers mel/head; ml/inference expects
+    # mel_transform/classifier. Normalise so any checkpoint loads.
+    python3 - "$MODELS_DIR/audio_spoof_final.pt" <<'PY'
+import sys, torch
+from pathlib import Path
+p = Path(sys.argv[1])
+if not p.exists():
+    raise SystemExit(0)
+sd = torch.load(p, map_location="cpu")
+if not any(k.startswith(("mel.", "head.")) for k in sd):
+    print("  audio checkpoint key names already correct")
+    raise SystemExit(0)
+ren = {}
+for k, v in sd.items():
+    if k.startswith("mel."):
+        k = k.replace("mel.", "mel_transform.", 1)
+    elif k.startswith("head."):
+        k = k.replace("head.", "classifier.", 1)
+    ren[k] = v
+torch.save(ren, p)
+print("  remapped audio checkpoint keys -> mel_transform/classifier")
+PY
+
     while IFS= read -r f; do
       cp "$f" "$EVAL_DIR/"
       echo "  eval    -> ml/evaluation/$(basename "$f")"
