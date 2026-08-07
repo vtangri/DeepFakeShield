@@ -164,17 +164,20 @@ class AudioSpoofService(BaseInferenceService):
             if not audio_path.exists():
                 return {"waveform": None, "raw_audio": None, "error": "Audio file not found"}
 
-            if TORCH_AVAILABLE:
+            # Load via librosa (uses audioread/soundfile — no torchcodec dependency needed,
+            # unlike torchaudio.load() on newer torchaudio releases) and resamples in one step.
+            if LIBROSA_AVAILABLE:
+                raw_audio_np, _ = librosa.load(str(audio_path), sr=self.sample_rate, mono=True)
+                if TORCH_AVAILABLE:
+                    waveform = torch.from_numpy(raw_audio_np).float().unsqueeze(0)
+            elif TORCH_AVAILABLE:
                 waveform, sr = torchaudio.load(str(audio_path))
                 if sr != self.sample_rate:
                     resampler = torchaudio.transforms.Resample(sr, self.sample_rate)
                     waveform = resampler(waveform)
                 if waveform.shape[0] > 1:
                     waveform = waveform.mean(dim=0, keepdim=True)
-
                 raw_audio_np = waveform.squeeze().numpy()
-            elif LIBROSA_AVAILABLE:
-                raw_audio_np, _ = librosa.load(str(audio_path), sr=self.sample_rate, mono=True)
             else:
                 return {"waveform": None, "raw_audio": None, "error": "No audio library available"}
 
