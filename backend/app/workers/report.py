@@ -243,28 +243,15 @@ def finalize_job(self, report_result: Dict[str, Any], job_id: str) -> Dict[str, 
 
 @celery_app.task(bind=True, queue="default")
 def run_full_pipeline(self, job_id: str):
-    """Run the complete analysis pipeline using a Celery canvas chain (non-blocking)."""
+    """Run the complete analysis pipeline sequentially."""
     from app.workers.preprocess import run_preprocessing_pipeline
     from app.workers.inference import run_inference_pipeline
-    from celery import chain
     
     try:
-        # Build non-blocking pipeline chain. Task args are swapped on downstream tasks so chain piped inputs match:
-        # 1. run_preprocessing_pipeline(job_id) -> returns preprocess_results
-        # 2. run_inference_pipeline(preprocess_results, job_id) -> returns fusion_results
-        # 3. generate_report(fusion_results, job_id) -> returns report_result
-        # 4. finalize_job(report_result, job_id) -> returns final_result
-        pipeline = chain(
-            run_preprocessing_pipeline.s(job_id),
-            run_inference_pipeline.s(job_id),
-            generate_report.s(job_id),
-            finalize_job.s(job_id)
-        )
-        
-        # Dispatch the chained pipeline asynchronously
-        pipeline.apply_async()
-        return {"job_id": job_id, "status": "QUEUED"}
-        
+        preprocess_results = run_preprocessing_pipeline.run(job_id)
+        fusion_result = run_inference_pipeline.run(preprocess_results, job_id)
+        report_result = generate_report.run(fusion_result, job_id)
+        return finalize_job.run(report_result, job_id)
     except Exception as e:
         update_job_status(job_id, TaskState.FAILED, 0.0, str(e))
         raise
