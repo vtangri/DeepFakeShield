@@ -50,6 +50,7 @@ services:
       - RUN_MIGRATIONS=1
     volumes:
       - ./backend:/app
+      - ./frontend:/app/frontend:ro
       - ./ml:/app/ml
       - ./ml/models:/app/ml_models
       - storage_data:/app/storage

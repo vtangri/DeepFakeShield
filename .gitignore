@@ -50,6 +50,10 @@ env/
 # Machine Learning Large Files & Datasets
 ml/data/
 ml/models/
+# Unpacked torch checkpoints (same weights as ml/models/, extracted by
+# torch.load inspection tooling) — 300MB+ of duplicate binaries.
+models/
+.DS_Store
 checkpoints/
 backend/ml/
 *.pt

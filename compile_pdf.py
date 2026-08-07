@@ -213,10 +213,12 @@ def compile_md_to_pdf(md_path, pdf_path):
     table_data = []
     
     def process_inline_md(text):
-        t = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
+        t = text.replace('<br>', '<br/>')
+        t = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', t)
         t = re.sub(r'\*(.*?)\*', r'<i>\1</i>', t)
         t = re.sub(r'`(.*?)`', r'<font name="Courier" color="#6366F1">\1</font>', t)
         return t
+
 
     i = 0
     is_first_header = True
