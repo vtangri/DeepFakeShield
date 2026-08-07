@@ -15,11 +15,15 @@ db_url = settings.DATABASE_URL
 if db_url.startswith("postgresql://"):
     db_url = db_url.replace("postgresql://", "postgresql+psycopg2://")
 
+# SQLite uses NullPool by default and doesn't accept pool_size/max_overflow —
+# those are QueuePool (Postgres/MySQL) options only.
+_is_sqlite = db_url.startswith("sqlite")
+_pool_kwargs = {} if _is_sqlite else {"pool_size": 5, "max_overflow": 10}
+
 sync_engine = create_engine(
     db_url,
     pool_pre_ping=True,
-    pool_size=5,
-    max_overflow=10,
+    **_pool_kwargs,
 )
 
 # Async engine for FastAPI
@@ -32,9 +36,8 @@ elif async_db_url.startswith("sqlite://"):
 async_engine = create_async_engine(
     async_db_url,
     pool_pre_ping=True,
-    pool_size=5,
-    max_overflow=10,
     echo=settings.DEBUG,
+    **_pool_kwargs,
 )
 
 # Session factories
