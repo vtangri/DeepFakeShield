@@ -42,27 +42,34 @@ if [[ "${RUN_MIGRATIONS:-0}" == "1" ]]; then
   echo "[entrypoint] migrations applied"
 else
   # Workers need the schema to exist but must not migrate concurrently.
-  for ((i = 1; i <= ${SCHEMA_WAIT_ATTEMPTS:-60}; i++)); do
+  schema_ready=0
+  attempts=${SCHEMA_WAIT_ATTEMPTS:-60}
+  for ((i = 1; i <= attempts; i++)); do
+    # Report the real error on the last attempt so a genuine failure is
+    # visible instead of looking like an endless wait.
+    if [[ $i -eq $attempts ]]; then redirect=/dev/stderr; else redirect=/dev/null; fi
     if python -c "
 import asyncio, sys
 from sqlalchemy import text
-from app.db.session import engine
+from app.db.session import async_engine
 
 async def main():
-    async with engine.connect() as conn:
+    async with async_engine.connect() as conn:
         await conn.execute(text('SELECT 1 FROM users LIMIT 1'))
 
-try:
-    asyncio.run(main())
-except Exception:
-    sys.exit(1)
-" 2>/dev/null; then
+asyncio.run(main())
+" 2>"$redirect"; then
       echo "[entrypoint] schema present"
+      schema_ready=1
       break
     fi
-    echo "[entrypoint] waiting for schema (${i})..."
+    echo "[entrypoint] waiting for schema (${i}/${attempts})..."
     sleep 2
   done
+  if [[ "$schema_ready" != "1" ]]; then
+    echo "[entrypoint] ERROR: schema never appeared; is the API container migrating?" >&2
+    exit 1
+  fi
 fi
 
 exec "$@"
