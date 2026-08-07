@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y \
 
 # Install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir setuptools==69.5.1 wheel
+RUN pip install --no-cache-dir "setuptools>=77,<81" wheel
 RUN pip install --no-cache-dir --no-build-isolation --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
 
 # Copy application code
