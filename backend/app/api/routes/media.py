@@ -24,11 +24,11 @@ from app.api.deps import get_current_user
 router = APIRouter(prefix="/media", tags=["Media"])
 
 
-# Allowed file types
+# Allowed file types — video or audio only; deepfake detection needs motion/speech signal,
+# a still image has neither, so image uploads are rejected rather than silently mishandled.
 ALLOWED_VIDEO_TYPES = {"video/mp4", "video/webm", "video/quicktime", "video/x-msvideo"}
 ALLOWED_AUDIO_TYPES = {"audio/mpeg", "audio/wav", "audio/ogg", "audio/flac"}
-ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
-ALLOWED_TYPES = ALLOWED_VIDEO_TYPES | ALLOWED_AUDIO_TYPES | ALLOWED_IMAGE_TYPES
+ALLOWED_TYPES = ALLOWED_VIDEO_TYPES | ALLOWED_AUDIO_TYPES
 
 
 def get_media_type(mime_type: str) -> str:
@@ -37,8 +37,6 @@ def get_media_type(mime_type: str) -> str:
         return "video"
     elif mime_type in ALLOWED_AUDIO_TYPES:
         return "audio"
-    elif mime_type in ALLOWED_IMAGE_TYPES:
-        return "image"
     return "unknown"
 
 
@@ -80,7 +78,7 @@ async def upload_media(
     if guessed_mime not in ALLOWED_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File type {guessed_mime} not allowed. Allowed types: video, audio, image"
+            detail=f"File type {guessed_mime} not allowed. Allowed types: video, audio"
         )
     
     # Create storage directory
