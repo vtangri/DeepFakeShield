@@ -156,10 +156,12 @@ class PDFReportGenerator:
             story.extend(self._build_technical_section(results))
         
         # Modality Scores & Detailed Analysis
+        # keys match run_{video,audio,lipsync}_inference()'s return in app/workers/inference.py —
+        # None (skipped modality) is normalized to 0.0 for display purposes only
         story.extend(self._build_modality_section(
-            video.get("score", 0.0), 
-            audio.get("score", 0.0), 
-            lipsync.get("score", 0.0), 
+            video.get("video_score") or 0.0,
+            audio.get("audio_score") or 0.0,
+            lipsync.get("lipsync_score") or 0.0,
             media_type,
             results
         ))
@@ -315,49 +317,57 @@ class PDFReportGenerator:
         def make_row(label, value, is_header=False):
             return [label, value]
 
-        # Video Section
-        if media_type in ["video", "image"]:
+        # Video Section — keys match run_video_inference()'s return in app/workers/inference.py
+        if media_type in ["video", "image"] and results.get("video", {}).get("video_score") is not None:
             vid = results.get("video", {})
             elements.append(Paragraph("🎬 Video Analysis", self.styles['Heading3']))
             v_data = [
                 ["Suspicion Score", f"{int(video_score*100)}%"],
-                ["Manipulation Type", vid.get("manipulation_type") or "None"],
-                ["Faces Detected", str(vid.get("faces_detected", "--"))],
-                ["Frames Analyzed", str(vid.get("frames_analyzed", "--"))]
+                ["Inference Mode", vid.get("inference_mode", "unknown")],
+                ["Frames Analyzed", str(vid.get("frame_count", "--"))],
+                ["Flagged Frames", str(vid.get("flagged_count", "--"))],
+                ["Peak Frame Score", f"{float(vid.get('max_score', 0))*100:.1f}%"],
             ]
             t = Table(v_data, colWidths=[2.5*inch, 3*inch])
             t.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 0.5, COLORS['light'])]))
             elements.append(t)
             elements.append(Spacer(1, 10))
 
-        # Audio Section
-        if media_type in ["video", "audio"]:
-            aud = results.get("audio", {})
+        # Audio Section — keys match run_audio_inference()'s return
+        aud = results.get("audio", {})
+        if media_type in ["video", "audio"] and aud.get("audio_score") is not None:
             elements.append(Paragraph("🔊 Audio Analysis", self.styles['Heading3']))
             a_data = [
                 ["Suspicion Score", f"{int(audio_score*100)}%"],
-                ["Voice Cloning", "Detected" if aud.get("voice_cloning_detected") else "Not Detected"],
-                ["Cloning Method", aud.get("cloning_method") or "N/A"],
-                ["MFCC Anomaly", f"{float(aud.get('spectral_analysis', {}).get('mfcc_anomaly_score', 0))*100:.1f}%"]
+                ["Inference Mode", aud.get("inference_mode", "unknown")],
+                ["Confidence", f"{float(aud.get('confidence', 0))*100:.1f}%"],
             ]
             t = Table(a_data, colWidths=[2.5*inch, 3*inch])
             t.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 0.5, COLORS['light'])]))
             elements.append(t)
             elements.append(Spacer(1, 10))
+        elif media_type in ["video", "audio"]:
+            elements.append(Paragraph("🔊 Audio Analysis", self.styles['Heading3']))
+            elements.append(Paragraph(aud.get("note", "No audio track present — audio analysis skipped."), self.styles['DSBodyText']))
+            elements.append(Spacer(1, 10))
 
-        # Lipsync Section
+        # Lipsync Section — keys match run_lipsync_inference()'s return; score is None when skipped
         if media_type == "video":
             ls = results.get("lipsync", {})
             elements.append(Paragraph("👄 Lip-Sync Analysis", self.styles['Heading3']))
-            l_data = [
-                ["Suspicion Score", f"{int(lipsync_score*100)}%"],
-                ["Sync Offset", f"{ls.get('sync_offset_ms', 0)}ms"],
-                ["Phoneme Accuracy", f"{float(ls.get('phoneme_accuracy', 0))*100:.1f}%"],
-                ["Viseme Match", f"{float(ls.get('viseme_match_rate', 0))*100:.1f}%"]
-            ]
-            t = Table(l_data, colWidths=[2.5*inch, 3*inch])
-            t.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 0.5, COLORS['light'])]))
-            elements.append(t)
+            if ls.get("lipsync_score") is not None:
+                l_data = [
+                    ["Suspicion Score", f"{int(lipsync_score*100)}%"],
+                    ["Confidence", f"{float(ls.get('confidence', 0))*100:.1f}%"],
+                ]
+                t = Table(l_data, colWidths=[2.5*inch, 3*inch])
+                t.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 0.5, COLORS['light'])]))
+                elements.append(t)
+            else:
+                elements.append(Paragraph(
+                    ls.get("note", "Lip-sync analysis was not applicable for this media."),
+                    self.styles['DSBodyText']
+                ))
             elements.append(Spacer(1, 10))
             
         # --- NEW FORENSIC SECTIONS ---
