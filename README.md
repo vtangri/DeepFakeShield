@@ -59,81 +59,104 @@ Before setting up the project, ensure you have the following installed:
 - **Node.js** (optional, for frontend development)
 - **Git** - For cloning the repository
 
-### Step 1: Clone the Repository
+### Option A: Docker Compose (recommended — starts DB, Redis, API, and both Celery workers)
 
 ```bash
-git clone https://github.com/vtangri/AI-4-Creativity-Project-Vanshika-Tangari-DeepFakeShield
+git clone https://github.com/vtangri/DeepFakeShield.git
 cd DeepFakeShield
+docker compose up --build
 ```
 
-### Step 2: Create Python Virtual Environment
-
-```bash
-# Create virtual environment
-python3 -m venv venv
-
-# Activate virtual environment
-# On macOS/Linux:
-source venv/bin/activate
-
-# On Windows:
-.\venv\Scripts\activate
-```
-
-### Step 3: Install Python Dependencies
-
-```bash
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-### Step 4: Configure Environment Variables
-
-```bash
-# Copy the example environment file
-cp .env.example .env
-
-# Edit .env file with your settings
-# Required variables:
-# - DATABASE_URL=postgresql://user:password@localhost:5432/deepfakeshield
-# - JWT_SECRET_KEY=your-secure-secret-key
-# - CELERY_BROKER_URL=redis://localhost:6379/0
-```
-
-### Step 5: Set Up PostgreSQL Database
-
-```bash
-# Create the database
-createdb deepfakeshield
-
-# Run database migrations
-cd backend
-alembic upgrade head
-```
-
-### Step 6: Start the Backend Server
-
-```bash
-cd backend
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-### Step 7: Start the Frontend Server
-
-Open a new terminal:
+This starts Postgres, Redis, the FastAPI backend, and the preprocess/inference Celery workers.
+`docker-compose.yml` does **not** include a frontend container, so serve the static frontend
+separately in a second terminal:
 
 ```bash
 cd frontend
 python3 -m http.server 8080
 ```
 
-### Step 8: Access the Application
+Then open:
+- 🌐 **Frontend**: http://localhost:8080
+- 📚 **API Documentation**: http://localhost:8000/docs
 
-Open your browser and navigate to:
+### Option B: Manual local setup
+
+#### Step 1: Clone the Repository
+
+```bash
+git clone https://github.com/vtangri/DeepFakeShield.git
+cd DeepFakeShield
+```
+
+#### Step 2: Create Python Virtual Environment
+
+```bash
+python3 -m venv venv
+source venv/bin/activate   # Windows: .\venv\Scripts\activate
+```
+
+#### Step 3: Install Python Dependencies
+
+```bash
+pip install --upgrade pip
+pip install -r backend/requirements.txt
+```
+
+#### Step 4: Configure Environment Variables
+
+```bash
+cp .env.example backend/.env
+```
+
+Edit `backend/.env` — the variable actually read by `backend/app/core/config.py` is
+**`SECRET_KEY`**, not `JWT_SECRET_KEY`. See `.env.example` for the full list (database URL,
+Redis URL, storage path, ML model version tags).
+
+#### Step 5: Set Up the Database
+
+The default `DATABASE_URL` in `.env.example` is SQLite (`sqlite+aiosqlite:///backend/prod.db`),
+so no separate database server is required for local development. To use PostgreSQL instead,
+set `DATABASE_URL=postgresql://user:password@localhost:5432/deepfakeshield` and create the DB
+first (`createdb deepfakeshield`). Either way, apply migrations:
+
+```bash
+cd backend
+alembic upgrade head
+```
+
+#### Step 6: Start Redis (required for Celery)
+
+```bash
+redis-server
+```
+
+#### Step 7: Start the Backend, Celery Workers, and Frontend
+
+Each in its own terminal:
+
+```bash
+# Backend API
+cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+# Celery preprocess worker
+cd backend && celery -A app.core.celery_app worker --loglevel=info -Q preprocess
+
+# Celery inference worker
+cd backend && celery -A app.core.celery_app worker --loglevel=info -Q inference
+
+# Frontend (static file server)
+cd frontend && python3 -m http.server 8080
+```
+
+#### Step 8: Access the Application
 
 - 🌐 **Frontend**: http://localhost:8080
 - 📚 **API Documentation**: http://localhost:8000/docs
 - 🔧 **API ReDoc**: http://localhost:8000/redoc
+
+> Analysis jobs require the backend, Redis, **and both** Celery workers running — the API alone
+> will accept uploads but jobs will never leave "queued" without the workers.
 
 ---
 
@@ -155,10 +178,12 @@ deepfakeshield/
 │   │   ├── models/             # SQLAlchemy ORM models
 │   │   ├── schemas/            # Pydantic validation schemas
 │   │   ├── services/           # Business logic services
-│   │   │   ├── simulation.py   # Analysis simulation
 │   │   │   └── pdf_service.py  # PDF generation
+│   │   ├── train/               # Training helper utilities used by the API layer
+│   │   ├── workers/             # Celery tasks that call into ml/inference/
 │   │   └── main.py             # FastAPI application
 │   ├── alembic/                # Database migrations
+│   ├── requirements.txt        # Python dependencies
 │   └── tests/                  # Unit tests
 ├── frontend/                   # Web frontend
 │   ├── index.html              # Single-page application
@@ -167,10 +192,11 @@ deepfakeshield/
 │   └── js/
 │       └── app.js              # API client & UI logic
 ├── ml/                         # Machine learning models
-│   ├── inference/              # Model inference code
-│   └── training/               # Model training scripts
-├── requirements.txt            # Python dependencies
-├── docker-compose.yml          # Docker configuration
+│   ├── inference/              # Model inference code (video_forensics, audio_spoof, lipsync, fusion)
+│   ├── training/                # Model training scripts (run on Kaggle GPU)
+│   ├── datasets/                # Dataset loaders
+│   └── models/                  # Trained checkpoints (.pt) — gitignored, downloaded from Kaggle
+├── docker-compose.yml          # Docker configuration (backend + workers + DB + Redis; no frontend container)
 └── README.md                   # This file
 ```
 
@@ -212,32 +238,37 @@ deepfakeshield/
 
 ## 🧠 ML Models & Detection Methods
 
-### Video Analysis
+Each service in `ml/inference/` has two operating modes: **TRAINED** (a fine-tuned checkpoint
+found in `ml/models/`) and a **fallback mode** based on real, non-learned signal processing —
+never a random or keyword-based score. See `ml/inference/*.py` docstrings for exact algorithms.
 
-| Aspect            | Details                                                   |
-| ----------------- | --------------------------------------------------------- |
-| **Model**         | ViT-B/16 (Vision Transformer)                             |
-| **Training Data** | FaceForensics++ dataset                                   |
-| **Detection**     | Face manipulation, boundary artifacts, GAN signatures     |
-| **Output**        | Manipulation probability, suspicious frame identification |
+### Video Analysis (`ml/inference/video_forensics.py`)
 
-### Audio Analysis
+| Aspect            | Details                                                                     |
+| ----------------- | ---------------------------------------------------------------------------- |
+| **Model**         | ViT-B/16 (Vision Transformer) backbone + custom binary classification head  |
+| **Training Data** | 140k Real and Fake Faces (Kaggle: xhlulu/140k-real-and-fake-faces)          |
+| **Fallback mode** | Inter-frame ViT feature-variance / cosine-distance anomaly scoring (no weights needed) |
+| **Detection**     | Facial region inconsistency across frames                                   |
+| **Output**        | Per-frame manipulation probability, suspicious frame identification         |
 
-| Aspect            | Details                                         |
-| ----------------- | ----------------------------------------------- |
-| **Method**        | MFCC spectral analysis, Wav2Vec2 embeddings     |
-| **Training Data** | ASVspoof dataset                                |
-| **Detection**     | Voice cloning, TTS synthesis, formant anomalies |
-| **Output**        | Cloning probability, naturalness score          |
+### Audio Analysis (`ml/inference/audio_spoof.py`)
 
-### Lip-Sync Analysis
+| Aspect            | Details                                                                     |
+| ----------------- | ---------------------------------------------------------------------------- |
+| **Model**         | Custom 4-block CNN over an 80-bin Mel spectrogram                           |
+| **Training Data** | ASVspoof 2019 Logical Access (Kaggle: awsaf49/asvpoof-2019-dataset)         |
+| **Fallback mode** | MFCC variance, spectral flatness, harmonic-to-noise ratio, zero-crossing rate (Sahidullah et al., 2015) |
+| **Detection**     | Synthetic speech / voice cloning spectral artifacts                         |
+| **Output**        | Spoof probability, spectral feature breakdown                               |
 
-| Aspect        | Details                            |
-| ------------- | ---------------------------------- |
-| **Model**     | SyncNet-based correlation          |
-| **Method**    | Audio-visual alignment scoring     |
-| **Detection** | Desynchronization, dubbed audio    |
-| **Output**    | Sync offset (ms), phoneme accuracy |
+### Lip-Sync Analysis (`ml/inference/lipsync.py`)
+
+| Aspect        | Details                                                                       |
+| ------------- | -------------------------------------------------------------------------------|
+| **Method**    | Cross-correlation between mouth-openness signal and audio RMS energy envelope (Chung & Zisserman, 2016) — no trained network required |
+| **Detection** | Sync offset above 80ms between mouth movement and audio                      |
+| **Output**    | Sync offset (ms), mismatch score. Returns `null`/`NOT_APPLICABLE` when there is no audio track or too few detected faces — it does not fabricate a score for silent or still-image input. |
 
 ---
 
@@ -318,12 +349,15 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-## 🤝 Acknowledgments
+## 🤝 Acknowledgments & References
 
-- FaceForensics++ dataset for video model training
-- ASVspoof dataset for audio model training
-- FastAPI for the excellent web framework
-- PyTorch for deep learning infrastructure
+- Dosovitskiy, A., et al. (2020). *An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale.* — ViT-B/16 backbone used in video forensics.
+- Chung, J. S., & Zisserman, A. (2016). *Out of Time: Automated Lip Sync in the Wild.* — cross-correlation approach used in lip-sync verification.
+- Sahidullah, M., Kinnunen, T., & Cser, R. (2015). *A Comparison of Features for Synthetic Speech Detection.* — spectral features used in the audio spectral-mode fallback.
+- 140k Real and Fake Faces (Kaggle: xhlulu/140k-real-and-fake-faces) — video model training data.
+- ASVspoof 2019 (Kaggle: awsaf49/asvpoof-2019-dataset) — audio model training data.
+- Kingma, D. P., & Ba, J. (2014). *Adam: A Method for Stochastic Optimization.* — optimizer (AdamW) used for both training runs.
+- FastAPI for the web framework; PyTorch/torchvision/torchaudio for deep learning infrastructure.
 
 ---
 

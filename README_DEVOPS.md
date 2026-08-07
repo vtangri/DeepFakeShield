@@ -16,8 +16,8 @@ This repository has been enhanced with a production-ready DevOps suite for fast,
 
 1. **SSH into your VPS** and clone the repo:
    ```bash
-   git clone https://github.com/vtangri/AI-4-Creativity-Project-Vanshika-Tangari-DeepFakeShield.git
-   cd AI-4-Creativity-Project-Vanshika-Tangari-DeepFakeShield
+   git clone https://github.com/vtangri/DeepFakeShield.git
+   cd DeepFakeShield
    ```
 
 2. **Run the deployment script**:
@@ -59,4 +59,3 @@ Since the project uses heavy ML libraries, follow these steps in your local term
 - **Backup DB**: `docker exec dfs-postgres pg_dump -U deepfakeshield deepfakeshield > backup.sql`
 
 ---
-*DevOps configuration provided by Antigravity AI.*

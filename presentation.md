@@ -23,11 +23,11 @@ The platform doesn't just output a binary "Fake" or "Real" label. It provides a 
 ### A. AI & Machine Learning Infrastructure
 | Component | Technology | Detail |
 | :--- | :--- | :--- |
-| **Video Model** | **ViT-B/16** | 12 Transformer layers, 12 heads, 768 hidden dim. |
-| **Audio Model** | **Wav2Vec2** | Self-supervised learning on raw waveforms for spoof detection. |
-| **Sync Model** | **SyncNet** | CNN-based cross-correlation for lip-audio alignment. |
-| **Inference** | **PyTorch 2.0+** | Accelerated with CUDA/ROCm where available. |
-| **Computer Vision** | **OpenCV & PIL** | Optimized frame extraction and spatial preprocessing. |
+| **Video Model** | **ViT-B/16** | 12 Transformer layers, 12 heads, 768 hidden dim, fine-tuned on 140k Real and Fake Faces. |
+| **Audio Model** | **Custom Mel-Spectrogram CNN** | 4-block Conv2d/BatchNorm/ReLU/MaxPool over an 80-bin Mel spectrogram, trained on ASVspoof 2019 LA. |
+| **Sync Model** | **Mouth-Audio Cross-Correlation** | No trained network — cross-correlates mouth-openness signal with audio RMS envelope. |
+| **Inference** | **PyTorch 2.2+** | CUDA-accelerated where available, CPU fallback otherwise. |
+| **Computer Vision** | **OpenCV & PIL** | Haar Cascade face detection, frame extraction and spatial preprocessing. |
 
 ### B. Scalable Backend Architecture
 | Component | Technology | Role |
@@ -58,9 +58,9 @@ graph TD
 
     subgraph Analysis_Engine [ML Processing Cluster]
         Redis <--> Worker[Celery Worker Nodes]
-        Worker --> V_Eng[Video Engine - ViT]
-        Worker --> A_Eng[Audio Engine - Wav2Vec2]
-        Worker --> L_Eng[Sync Engine - SyncNet]
+        Worker --> V_Eng[Video Engine - ViT-B/16]
+        Worker --> A_Eng[Audio Engine - Mel-Spectrogram CNN]
+        Worker --> L_Eng[Sync Engine - Cross-Correlation]
         V_Eng & A_Eng & L_Eng --> Fusion[Weighted Fusion Module]
     end
 
@@ -75,19 +75,26 @@ graph TD
 ## 🧠 4. The Science Behind Detection
 
 ### Phase 1: Spatial & Temporal Feature Learning
-Our **Vision Transformer (ViT)** model views a frame as a sequence of 16x16 patches. This allows the model to learn:
-- **Boundary Inconsistencies:** Artifacts at the seam where a fake face meets a real body.
-- **Subtle Texture Blurring:** Deepfake generators often struggle with skin pores and micro-expressions.
-- **GAN Signatures:** Spectral patterns left by Generative Adversarial Networks.
+Our **Vision Transformer (ViT-B/16)** model views a face crop as a sequence of 16x16 patches
+(`ml/inference/video_forensics.py`). When a fine-tuned checkpoint is loaded, it classifies each
+frame directly. When no checkpoint is present, the same backbone is used as a feature extractor:
+per-frame feature vectors are compared for cosine-distance anomaly against the sequence mean and
+against neighboring frames — deepfake video generated frame-by-frame tends to show higher
+inter-frame feature variance than genuine video (Li & Lyu, 2019).
 
 ### Phase 2: Audio Spoof Detection
-Using **Wav2Vec2**, the system analyzes the raw waveform to detect:
-- **Formant Anomalies:** Variations in vocal tract resonance that differ from human speech.
-- **Phase Inconsistencies:** Discontinuities in synthetic audio segments.
-- **Silence Analysis:** Artifacts in the quiet segments of a voice-cloned clip.
+The trained path (`ml/inference/audio_spoof.py`) runs a custom CNN over an 80-bin Mel
+spectrogram, trained on ASVspoof 2019 to discriminate bonafide from spoofed speech. The fallback
+path computes real spectral features — MFCC variance, spectral flatness, harmonic-to-noise
+ratio, zero-crossing rate — documented to differ between natural and synthesized speech
+(Sahidullah et al., 2015).
 
 ### Phase 3: Cross-Modal Alignment (Lip-Sync)
-The system calculates the **Correlation Coefficient** between the visual movement of the lips and the acoustic phonemes. A mismatch in timing (Lip-Sync lag) is a high-confidence indicator of a "Deepfake Reenactment" or "Voice Over Dubbing."
+The system cross-correlates a mouth-openness signal (from Haar Cascade face detection) against
+the audio RMS energy envelope (`ml/inference/lipsync.py`). A sync offset above 80ms, or low
+zero-lag correlation, is a high-confidence indicator of dubbing or reenactment. This stage
+requires no trained weights and is skipped (returns `null`, not a fabricated score) when there
+is no audio track or too few frames have a detected face.
 
 ---
 
@@ -96,11 +103,17 @@ The final verdict is calculated using a **Confidence-Weighted Ensemble**:
 
 $$Score = \frac{\sum (ModalityScore_i \times Confidence_i)}{\sum Confidence_i}$$
 
-| Modality | Default Weight | Key Artifacts Detected |
+| Modality | Default Weight | Key Signal |
 | :--- | :--- | :--- |
-| **Video** | 45% | Eye blinking anomalies, facial jitter, boundary noise. |
-| **Audio** | 30% | Spectral gaps, robotic resonance, pitch-shifting artifacts. |
-| **Lip-Sync** | 25% | Audio-Visual lag, phoneme-viseme mismatch. |
+| **Video** | 45% | Per-frame manipulation probability / inter-frame feature anomaly. |
+| **Audio** | 30% | Spoof probability from Mel-CNN or spectral flatness/MFCC-variance heuristics. |
+| **Lip-Sync** | 25% | Mouth-audio cross-correlation offset (ms). |
+
+When a modality is unavailable (no audio track, no detected face), its weight is dropped and the
+remaining weights are re-normalized rather than treated as a zero/authentic score
+(`ml/inference/fusion.py`). The weights above are engineering defaults, not the result of a
+completed calibration experiment — `MultimodalFusionService.calibrate()` exists in the code for
+future grid-search tuning against labeled validation data but has not yet been run.
 
 ---
 
@@ -115,14 +128,12 @@ sequenceDiagram
     
     U->>B: Upload Media (SHA-256 integrity check)
     B-> R: Push Analysis Task
-    R->>W: Fetch Task
-    Note over W: Multithreaded Processing
+    R->>W: Fetch Task (Celery preprocess/inference queues)
+    Note over W: ViT Inference (GPU if ENABLE_GPU=true, else CPU)
     W->>W: Frame Extraction & Normalization
-    W->>W: GPU-Accelerated ViT Inference
-    W->>W: Audio Spectral Analysis
-    W->>W: Cross-Correlation (Lip-Sync)
-    W->>B: Persist Results to PostgreSQL
-    B->>U: Notify Progress (WebSockets/Polling)
+    W->>W: Video / Audio / Lip-Sync Inference
+    W->>B: Persist Results to Database
+    B->>U: Notify Progress (client polling /analysis/{id}/status)
     U->>B: Generate PDF Forensic Report
 ```
 
