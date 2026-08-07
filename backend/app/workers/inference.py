@@ -403,25 +403,13 @@ def run_inference_pipeline(self, preprocess_results: Dict, job_id: str):
         audio_data = preprocess_results.get("audio", {})
         transcript = preprocess_results.get("transcript", {})
 
-        # Run video inference
-        video_result = run_video_inference.apply(
-            args=[job_id, frames_data]
-        ).get()
-
-        # Run audio inference (passes audio metadata for has_audio check)
-        audio_result = run_audio_inference.apply(
-            args=[job_id, audio_data]
-        ).get()
-
-        # Run lip-sync inference (passes both audio and frame data)
-        lipsync_result = run_lipsync_inference.apply(
-            args=[job_id, frames_data, audio_data, transcript]
-        ).get()
-
-        # Run fusion
-        fusion_result = run_fusion.apply(
-            args=[job_id, video_result, audio_result, lipsync_result]
-        ).get()
+        # Call task bodies directly via .run() rather than .apply(...).get() — calling
+        # .get() from within a running Celery task is explicitly disallowed (deadlock risk)
+        # and these sub-steps only ever run inline as part of this pipeline anyway.
+        video_result = run_video_inference.run(job_id, frames_data)
+        audio_result = run_audio_inference.run(job_id, audio_data)
+        lipsync_result = run_lipsync_inference.run(job_id, frames_data, audio_data, transcript)
+        fusion_result = run_fusion.run(job_id, video_result, audio_result, lipsync_result)
 
         return fusion_result
 

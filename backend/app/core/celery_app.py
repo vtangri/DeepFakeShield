@@ -24,11 +24,13 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     
-    # Task routing
+    # Task routing. Only two Celery workers run (preprocess, inference — see
+    # docker-compose.yml); nothing consumes a "default" queue, so report/pipeline-dispatch
+    # tasks route onto "preprocess" rather than a queue nothing listens on.
     task_routes={
         "app.workers.preprocess.*": {"queue": "preprocess"},
         "app.workers.inference.*": {"queue": "inference"},
-        "app.workers.report.*": {"queue": "default"},
+        "app.workers.report.*": {"queue": "preprocess"},
     },
     
     # Retry policy
