@@ -3,11 +3,12 @@ Dataset utilities for deepfake detection training.
 """
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Callable
+from collections import Counter
 import json
 
 try:
     import torch
-    from torch.utils.data import Dataset, DataLoader
+    from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
     import numpy as np
     TORCH_AVAILABLE = True
 except ImportError:
@@ -223,10 +224,26 @@ def create_data_loaders(
     val_dataset = DatasetClass(data_dir, split="val", **extra)
     test_dataset = DatasetClass(data_dir, split="test", **extra)
     
+    # Real deepfake corpora are heavily skewed (FaceForensics++ ships roughly
+    # 6x more fake than real frames). Without rebalancing, a model reaches high
+    # accuracy by always predicting the majority class, so sample the training
+    # set inversely to class frequency.
+    train_sampler = None
+    train_labels = [s["label"] for s in getattr(train_dataset, "samples", [])]
+    if train_labels and len(set(train_labels)) > 1:
+        counts = Counter(train_labels)
+        class_weight = {c: len(train_labels) / (len(counts) * n) for c, n in counts.items()}
+        weights = [class_weight[l] for l in train_labels]
+        train_sampler = WeightedRandomSampler(
+            weights=weights, num_samples=len(weights), replacement=True
+        )
+        print(f"Balancing train split: {dict(counts)} -> weights {class_weight}")
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
-        shuffle=True,
+        shuffle=(train_sampler is None),
+        sampler=train_sampler,
         num_workers=num_workers,
         pin_memory=True,
     )

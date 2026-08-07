@@ -25,8 +25,9 @@ services:
   # FastAPI backend
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile.prod
+      # root context so the image can include the shared ml/ package
+      context: .
+      dockerfile: backend/Dockerfile.prod
     container_name: deepfakeshield-backend
     environment:
       - DATABASE_URL=postgresql://deepfakeshield:${DB_PASSWORD}@postgres:5432/deepfakeshield
@@ -54,8 +55,9 @@ services:
   # Celery workers (CPU)
   celery-default:
     build:
-      context: ./backend
-      dockerfile: Dockerfile.prod
+      # root context so the image can include the shared ml/ package
+      context: .
+      dockerfile: backend/Dockerfile.prod
     container_name: deepfakeshield-celery-default
     command: celery -A app.core.celery_app worker -Q default -c 2 --loglevel=info
     environment:
@@ -75,8 +77,9 @@ services:
   # Celery preprocess worker
   celery-preprocess:
     build:
-      context: ./backend
-      dockerfile: Dockerfile.prod
+      # root context so the image can include the shared ml/ package
+      context: .
+      dockerfile: backend/Dockerfile.prod
     container_name: deepfakeshield-celery-preprocess
     command: celery -A app.core.celery_app worker -Q preprocess -c 4 --loglevel=info
     environment:
@@ -94,8 +97,9 @@ services:
   # Celery GPU inference worker
   celery-inference:
     build:
-      context: ./backend
-      dockerfile: Dockerfile.gpu
+      # root context so the image can include the shared ml/ package
+      context: .
+      dockerfile: backend/Dockerfile.gpu
     container_name: deepfakeshield-celery-inference
     command: celery -A app.core.celery_app worker -Q inference -c 1 --loglevel=info
     environment:
@@ -158,8 +162,9 @@ services:
   # Flower (Celery monitoring)
   flower:
     build:
-      context: ./backend
-      dockerfile: Dockerfile.prod
+      # root context so the image can include the shared ml/ package
+      context: .
+      dockerfile: backend/Dockerfile.prod
     container_name: deepfakeshield-flower
     command: celery -A app.core.celery_app flower --port=5555
     environment:

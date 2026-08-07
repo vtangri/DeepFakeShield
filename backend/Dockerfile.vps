@@ -15,7 +15,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir gunicorn \
     && pip install --no-cache-dir -r requirements.txt
 
@@ -44,7 +44,9 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
 # Copy application code
-COPY . .
+# Build context is the repo root so the shared ml/ package ships too.
+COPY backend/ /app/
+COPY ml/ /app/ml/
 
 # Create non-root user + storage directory
 RUN useradd -m -u 1000 appuser \

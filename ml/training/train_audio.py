@@ -64,7 +64,8 @@ class AudioSpoofModel(nn.Module):
             nn.ReLU(),
             nn.Dropout(0.5),
             nn.Linear(256, 1),
-            nn.Sigmoid(),
+            # No Sigmoid — see train_video.py; BCEWithLogitsLoss fuses it and
+            # the inference model applies sigmoid itself.
         )
     
     def forward(self, x):
@@ -91,10 +92,12 @@ def train_epoch(model, loader, criterion, optimizer, device):
         outputs = model(waveform)
         loss = criterion(outputs, labels)
         loss.backward()
+        # Clip before stepping: these heads diverged with exploding val loss
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
         
         total_loss += loss.item()
-        predictions = (outputs > 0.5).float()
+        predictions = (outputs > 0).float()
         correct += (predictions == labels).sum().item()
         total += labels.size(0)
     
@@ -116,7 +119,7 @@ def validate(model, loader, criterion, device):
             loss = criterion(outputs, labels)
             
             total_loss += loss.item()
-            predictions = (outputs > 0.5).float()
+            predictions = (outputs > 0).float()
             correct += (predictions == labels).sum().item()
             total += labels.size(0)
     
@@ -131,6 +134,8 @@ def main():
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--patience", type=int, default=5,
+                        help="Stop after this many epochs without val-loss improvement")
     args = parser.parse_args()
     
     output_dir = Path(args.output_dir)
@@ -144,12 +149,15 @@ def main():
     
     # Model
     model = AudioSpoofModel().to(device)
-    criterion = nn.BCELoss()
+    criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3)
     
     writer = SummaryWriter(output_dir / "logs")
     best_val_acc = 0
+    best_val_loss = float("inf")
+    epochs_no_improve = 0
+    patience = args.patience
     
     for epoch in range(args.epochs):
         print(f"\nEpoch {epoch + 1}/{args.epochs}")
@@ -167,7 +175,23 @@ def main():
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             torch.save(model.state_dict(), output_dir / "audio_spoof_best.pt")
-    
+
+        # Early stopping tracks val LOSS, not accuracy: accuracy plateaus while
+        # the model is still overfitting, which is how earlier runs kept
+        # training through a val loss that had already blown up.
+        if val_loss < best_val_loss - 1e-4:
+            best_val_loss = val_loss
+            epochs_no_improve = 0
+        else:
+            epochs_no_improve += 1
+            if epochs_no_improve >= patience:
+                print(
+                    f"Early stopping at epoch {epoch + 1}: "
+                    f"val loss has not improved for {patience} epochs "
+                    f"(best={best_val_loss:.4f})"
+                )
+                break
+
     # Test
     model.load_state_dict(torch.load(output_dir / "audio_spoof_best.pt"))
     test_loss, test_acc = validate(model, test_loader, criterion, device)

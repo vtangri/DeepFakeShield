@@ -36,8 +36,9 @@ services:
   # FastAPI Backend
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      # root context so the image can include the shared ml/ package
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: deepfakeshield-backend
     environment:
       - DATABASE_URL=postgresql://deepfakeshield:deepfakeshield@postgres:5432/deepfakeshield
@@ -45,6 +46,8 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - STORAGE_PATH=/app/storage
+      # only the API container migrates; workers wait for the schema
+      - RUN_MIGRATIONS=1
     volumes:
       - ./backend:/app
       - ./ml:/app/ml
@@ -58,12 +61,19 @@ services:
       redis:
         condition: service_healthy
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
 
   # Celery Preprocess Worker
   celery-preprocess:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      # root context so the image can include the shared ml/ package
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: deepfakeshield-celery-preprocess
     environment:
       - DATABASE_URL=postgresql://deepfakeshield:deepfakeshield@postgres:5432/deepfakeshield
@@ -81,13 +91,23 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: celery -A app.core.celery_app worker --loglevel=info -Q preprocess
+    command: >
+      celery -A app.core.celery_app worker --loglevel=info -Q preprocess
+      --concurrency=2 --max-tasks-per-child=10
+    mem_limit: 1500m
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.core.celery_app inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 30s
+      timeout: 20s
+      retries: 5
+      start_period: 90s
 
   # Celery Inference Worker
   celery-inference:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      # root context so the image can include the shared ml/ package
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: deepfakeshield-celery-inference
     environment:
       - DATABASE_URL=postgresql://deepfakeshield:deepfakeshield@postgres:5432/deepfakeshield
@@ -106,15 +126,25 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: celery -A app.core.celery_app worker --loglevel=info -Q inference
+    command: >
+      celery -A app.core.celery_app worker --loglevel=info -Q inference
+      --concurrency=1 --max-tasks-per-child=1
+    mem_limit: 3g
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.core.celery_app inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 30s
+      timeout: 20s
+      retries: 5
+      start_period: 90s
 
   # Celery Default Worker — orchestration and report tasks route to "default"
   # (see task_routes in app/core/celery_app.py). Without this service, jobs
   # sit in the queue forever at PENDING.
   celery-default:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      # root context so the image can include the shared ml/ package
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: deepfakeshield-celery-default
     environment:
       - DATABASE_URL=postgresql://deepfakeshield:deepfakeshield@postgres:5432/deepfakeshield
@@ -133,7 +163,16 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: celery -A app.core.celery_app worker --loglevel=info -Q default
+    command: >
+      celery -A app.core.celery_app worker --loglevel=info -Q default
+      --concurrency=2 --max-tasks-per-child=20
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.core.celery_app inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 30s
+      timeout: 20s
+      retries: 5
+      start_period: 90s
 
 volumes:
   postgres_data:

@@ -38,7 +38,10 @@ def create_model(num_classes: int = 1, pretrained: bool = True):
         nn.ReLU(),
         nn.Dropout(0.3),
         nn.Linear(256, num_classes),
-        nn.Sigmoid() if num_classes == 1 else nn.Identity()
+        # No Sigmoid: training uses BCEWithLogitsLoss, which fuses the sigmoid
+        # for numerical stability. Sigmoid is parameterless, so checkpoints stay
+        # compatible with the inference head in ml/inference/video_forensics.py,
+        # which applies its own sigmoid to turn these logits into probabilities.
     )
     
     return model
@@ -73,10 +76,12 @@ def train_epoch(model, loader, criterion, optimizer, device, scaler=None):
             outputs = model(frames)
             loss = criterion(outputs, labels)
             loss.backward()
+            # Clip before stepping: these heads diverged with exploding val loss
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
         
         total_loss += loss.item()
-        predictions = (outputs > 0.5).float()
+        predictions = (outputs > 0).float()
         correct += (predictions == labels).sum().item()
         total += labels.size(0)
         
@@ -109,11 +114,11 @@ def validate(model, loader, criterion, device):
             loss = criterion(outputs, labels)
             
             total_loss += loss.item()
-            predictions = (outputs > 0.5).float()
+            predictions = (outputs > 0).float()
             correct += (predictions == labels).sum().item()
             total += labels.size(0)
             
-            all_preds.extend(outputs.cpu().numpy().flatten())
+            all_preds.extend(torch.sigmoid(outputs).cpu().numpy().flatten())
             all_labels.extend(labels.cpu().numpy().flatten())
     
     return total_loss / len(loader), correct / total, all_preds, all_labels
@@ -128,6 +133,8 @@ def main():
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--amp", action="store_true", help="Use automatic mixed precision")
+    parser.add_argument("--patience", type=int, default=5,
+                        help="Stop after this many epochs without val-loss improvement")
     args = parser.parse_args()
     
     # Setup
@@ -157,7 +164,7 @@ def main():
     
     # Model
     model = create_model().to(device)
-    criterion = nn.BCELoss()
+    criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     
@@ -168,6 +175,9 @@ def main():
     
     # Training loop
     best_val_acc = 0
+    best_val_loss = float("inf")
+    epochs_no_improve = 0
+    patience = args.patience
     for epoch in range(args.epochs):
         print(f"\nEpoch {epoch + 1}/{args.epochs}")
         
@@ -187,6 +197,15 @@ def main():
         print(f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
         print(f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
         
+        # Early stopping tracks val LOSS, not accuracy: accuracy plateaus while
+        # the model is still overfitting, which is how earlier runs kept
+        # training through a val loss that had already blown up.
+        if val_loss < best_val_loss - 1e-4:
+            best_val_loss = val_loss
+            epochs_no_improve = 0
+        else:
+            epochs_no_improve += 1
+
         # Save best
         if val_acc > best_val_acc:
             best_val_acc = val_acc
@@ -197,7 +216,15 @@ def main():
                 "val_acc": val_acc,
             }, output_dir / "best_model.pt")
             print(f"Saved best model with val_acc: {val_acc:.4f}")
-    
+
+        if epochs_no_improve >= patience:
+            print(
+                f"Early stopping at epoch {epoch + 1}: "
+                f"val loss has not improved for {patience} epochs "
+                f"(best={best_val_loss:.4f})"
+            )
+            break
+
     # Test
     print("\nTesting best model...")
     checkpoint = torch.load(output_dir / "best_model.pt")

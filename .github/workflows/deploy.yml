@@ -43,7 +43,8 @@ jobs:
       - name: Build and push Backend image
         uses: docker/build-push-action@v5
         with:
-          context: ./backend
+          # root context so the image includes the shared ml/ package
+          context: .
           file: ./backend/Dockerfile.vps
           push: true
           tags: ${{ steps.meta.outputs.tags }}

@@ -1,0 +1,37 @@
+# Build context is the repo root so images can include both backend/ and ml/.
+# Keep everything else out — model weights alone are >1GB and are mounted at
+# runtime, not baked into the image.
+.git
+.github
+**/__pycache__
+**/*.pyc
+**/*.pyo
+venv
+.venv
+node_modules
+
+# Trained weights and datasets (mounted as volumes)
+ml/models
+ml/data
+ml/kaggle/output
+ml/evaluation
+checkpoints
+models
+backend/ml_models
+backend/storage
+storage
+
+# Local state
+*.db
+test.db
+.env
+.env.prod
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Docs / artefacts
+*.pdf
+*.docx
+frontend/node_modules
+deploy/ssl

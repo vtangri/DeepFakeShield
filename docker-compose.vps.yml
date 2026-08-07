@@ -128,8 +128,14 @@ services:
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - STORAGE_PATH=/data/storage
       - ENABLE_GPU=false
+      - ML_MODELS_PATH=/models
+      - VIDEO_MODEL_PATH=/models/video_forensics_final.pt
+      - AUDIO_MODEL_PATH=/models/audio_spoof_final.pt
     volumes:
       - storage_data:/data/storage
+      # Trained weights are not baked into the image (>1GB); copy them to
+      # ./ml/models on the host before deploying.
+      - ./ml/models:/models:ro
     depends_on:
       - redis
       - backend

@@ -5,6 +5,7 @@ Uses a fine-tuned ViT-B/16 model for deepfake detection when trained weights
 are available. Falls back to feature-based statistical analysis using the
 pretrained ImageNet backbone when no custom weights exist.
 """
+import os
 import time
 import logging
 from pathlib import Path
@@ -47,7 +48,10 @@ class VideoForensicsService(BaseInferenceService):
 
     MODEL_VERSION = "v1.0.0"
     DEFAULT_IMAGE_SIZE = 224
-    DEFAULT_BATCH_SIZE = 16
+    # A batch of 16 through ViT-B/16 peaks well over 2GB on CPU and gets the
+    # worker OOM-killed in a memory-capped container. Keep the CPU default
+    # small; override with VIDEO_BATCH_SIZE (or the constructor) on GPU hosts.
+    DEFAULT_BATCH_SIZE = int(os.getenv("VIDEO_BATCH_SIZE", "4"))
 
     # Thresholds calibrated on FaceForensics++ validation set
     FEATURE_MODE_SENSITIVITY = 0.35  # Feature variance threshold
@@ -104,7 +108,11 @@ class VideoForensicsService(BaseInferenceService):
         if resolved_path:
             # TRAINED MODE: Load fine-tuned checkpoint
             logger.info(f"Loading trained video model from: {resolved_path}")
-            self.model = vit_b_16(weights=ViT_B_16_Weights.DEFAULT)
+            # weights=None: every parameter is about to be overwritten by the
+            # checkpoint below, so downloading 330MB of ImageNet weights first
+            # is pure waste — and it makes startup fail on hosts with no
+            # outbound internet.
+            self.model = vit_b_16(weights=None)
             self.model.heads = self._create_classification_head()
 
             checkpoint = torch.load(resolved_path, map_location=self.device)
