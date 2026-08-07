@@ -40,6 +40,7 @@ services:
       dockerfile: Dockerfile
     container_name: deepfakeshield-backend
     environment:
+      - DEBUG=true
       - DATABASE_URL=postgresql://deepfakeshield:deepfakeshield@postgres:5432/deepfakeshield
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
@@ -47,6 +48,7 @@ services:
       - STORAGE_PATH=/app/storage
     volumes:
       - ./backend:/app
+      - ./ml:/app/ml
       - ./ml/models:/app/ml_models
       - storage_data:/app/storage
     ports:
@@ -56,7 +58,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
   # Celery Preprocess Worker
   celery-preprocess:
@@ -65,6 +67,7 @@ services:
       dockerfile: Dockerfile
     container_name: deepfakeshield-celery-preprocess
     environment:
+      - DEBUG=true
       - DATABASE_URL=postgresql://deepfakeshield:deepfakeshield@postgres:5432/deepfakeshield
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
@@ -72,6 +75,7 @@ services:
       - STORAGE_PATH=/app/storage
     volumes:
       - ./backend:/app
+      - ./ml:/app/ml
       - ./ml/models:/app/ml_models
       - storage_data:/app/storage
     depends_on:
@@ -88,6 +92,7 @@ services:
       dockerfile: Dockerfile
     container_name: deepfakeshield-celery-inference
     environment:
+      - DEBUG=true
       - DATABASE_URL=postgresql://deepfakeshield:deepfakeshield@postgres:5432/deepfakeshield
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
@@ -96,6 +101,7 @@ services:
       - ML_MODELS_PATH=/app/ml_models
     volumes:
       - ./backend:/app
+      - ./ml:/app/ml
       - ./ml/models:/app/ml_models
       - storage_data:/app/storage
     depends_on:
