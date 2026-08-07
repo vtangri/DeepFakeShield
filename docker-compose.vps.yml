@@ -98,6 +98,8 @@ services:
       - redis
       - postgres
       - backend
+    healthcheck:
+      disable: true
     restart: unless-stopped
     networks:
       - dfs-net
@@ -139,6 +141,8 @@ services:
     depends_on:
       - redis
       - backend
+    healthcheck:
+      disable: true
     restart: unless-stopped
     networks:
       - dfs-net
@@ -172,6 +176,8 @@ services:
     depends_on:
       - redis
       - backend
+    healthcheck:
+      disable: true
     restart: unless-stopped
     networks:
       - dfs-net
@@ -250,6 +256,8 @@ services:
       - "127.0.0.1:5555:5555"   # Localhost only — use SSH tunnel
     depends_on:
       - redis
+    healthcheck:
+      disable: true
     restart: unless-stopped
     networks:
       - dfs-net
