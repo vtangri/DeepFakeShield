@@ -274,8 +274,12 @@ function initFileUpload() {
     function handleFiles(files) {
         if(files.length > 0) {
             const file = files[0];
+            if (!file.type.startsWith('video/') && !file.type.startsWith('audio/')) {
+                alert('Only video or audio files are supported.');
+                return;
+            }
             state.selectedFile = file;
-            
+
             // Visual Update
             document.getElementById('fileName').textContent = file.name;
             document.getElementById('fileSize').textContent = formatBytes(file.size);
@@ -625,18 +629,16 @@ function showMediaPreview() {
 }
 
 function updateModalityScores(data) {
-    // Get results object (contains all the detailed data)
+    // Get results object — matches job.results shape built in
+    // backend/app/workers/inference.py::run_fusion (video_score/audio_score/lipsync_score keys)
     const results = data.results || {};
     const video = results.video || {};
     const audio = results.audio || {};
     const lipsync = results.lipsync || {};
-    const metadata = results.metadata || {};
-    const techSummary = results.technical_summary || {};
-    const artifacts = video.artifacts || {};
-    
+
     // Video Analysis
-    const hasVideo = video.score !== null && video.score !== undefined;
-    const videoScore = hasVideo ? Math.round(video.score * 100) : null;
+    const hasVideo = video.video_score !== null && video.video_score !== undefined;
+    const videoScore = hasVideo ? Math.round(video.video_score * 100) : null;
     const videoBar = document.getElementById('videoScoreBar');
     const videoText = document.getElementById('videoScoreText');
     if (videoBar) {
@@ -658,12 +660,12 @@ function updateModalityScores(data) {
     }
     
     // Video Details
-    setText('framesAnalyzed', hasVideo ? (video.frames_analyzed || '--') : 'N/A');
-    setText('facesDetected', hasVideo ? (video.faces_detected || '--') : 'N/A');
-    setText('manipulationType', hasVideo ? (video.manipulation_type || 'None') : 'N/A');
-    setText('blendingScore', hasVideo && video.frame_analysis?.blending_score != null ? 
-        `${(video.frame_analysis.blending_score * 100).toFixed(1)}%` : 'N/A');
-    
+    setText('framesAnalyzed', hasVideo ? (video.frame_count ?? '--') : 'N/A');
+    setText('facesDetected', hasVideo ? (video.flagged_count ?? '--') : 'N/A');
+    setText('manipulationType', hasVideo ? (video.inference_mode || 'unknown') : 'N/A');
+    setText('blendingScore', hasVideo && video.max_score != null ?
+        `${(video.max_score * 100).toFixed(1)}%` : 'N/A');
+
     // Video Description
     const videoDesc = document.getElementById('videoDescription');
     if (videoDesc) {
@@ -672,15 +674,15 @@ function updateModalityScores(data) {
         } else if (videoScore < 30) {
             videoDesc.textContent = 'No facial manipulation artifacts detected in analyzed frames.';
         } else if (videoScore < 70) {
-            videoDesc.textContent = `Potential ${video.manipulation_type || 'manipulation'} detected. Manual review recommended.`;
+            videoDesc.textContent = 'Potential manipulation detected. Manual review recommended.';
         } else {
-            videoDesc.textContent = `High confidence ${video.manipulation_type || 'deepfake'} detected via ${video.manipulation_method || 'AI synthesis'}.`;
+            videoDesc.textContent = `High confidence of manipulation (${video.flagged_count ?? 0} flagged frame(s)).`;
         }
     }
-    
+
     // Audio Analysis
-    const hasAudio = audio.score !== null && audio.score !== undefined;
-    const audioScore = hasAudio ? Math.round(audio.score * 100) : null;
+    const hasAudio = audio.audio_score !== null && audio.audio_score !== undefined;
+    const audioScore = hasAudio ? Math.round(audio.audio_score * 100) : null;
     const audioBar = document.getElementById('audioScoreBar');
     const audioText = document.getElementById('audioScoreText');
     if (audioBar) {
@@ -702,22 +704,13 @@ function updateModalityScores(data) {
     }
     
     // Audio Details
-    setText('voiceCloning', hasAudio ? (audio.voice_cloning_detected ? 
-        `Detected (${audio.cloning_method || 'Unknown'})` : 'Not Detected') : 'N/A');
-    setText('mfccScore', hasAudio && audio.spectral_analysis?.mfcc_anomaly_score != null ?
-        `${(audio.spectral_analysis.mfcc_anomaly_score * 100).toFixed(1)}%` : 'N/A');
-    setText('naturalness', hasAudio && audio.voice_identity?.naturalness_score != null ?
-        `${Math.round(audio.voice_identity.naturalness_score * 100)}%` : 'N/A');
-    setText('formantStatus', hasAudio ? (audio.spectral_analysis?.formant_consistency || '--') : 'N/A');
-    
-    // Linguistic Analysis
-    const ling = results.linguistic_analysis || {};
-    const lingPatterns = ling.suspicious_patterns || {};
-    
-    setText('aiTextProb', hasAudio && ling.generated_text_probability != null ? `${Math.round(ling.generated_text_probability * 100)}%` : 'N/A');
-    setText('templatedSpeech', hasAudio ? (lingPatterns.templated_speech ? '⚠️ Yes' : 'No') : 'N/A');
-    setText('repetitionStatus', hasAudio ? (lingPatterns.unnatural_repetition ? '⚠️ Detected' : 'Normal') : 'N/A');
-    
+    setText('voiceCloning', hasAudio ? (audioScore > 60 ? 'Likely Detected' : 'Not Detected') : 'N/A');
+    setText('mfccScore', hasAudio && audio.spectral_features?.mfcc_mean_var != null ?
+        audio.spectral_features.mfcc_mean_var.toFixed(2) : 'N/A');
+    setText('naturalness', hasAudio && audio.confidence != null ?
+        `${Math.round(audio.confidence * 100)}%` : 'N/A');
+    setText('formantStatus', hasAudio ? (audio.inference_mode || '--') : 'N/A');
+
     // Audio Description
     const audioDesc = document.getElementById('audioDescription');
     if (audioDesc) {
@@ -728,92 +721,47 @@ function updateModalityScores(data) {
         } else if (audioScore < 70) {
             audioDesc.textContent = 'Some audio anomalies detected in spectral analysis.';
         } else {
-            audioDesc.textContent = `Voice cloning detected (${audio.cloning_method || 'AI synthesis'}). Unnatural formants.`;
+            audioDesc.textContent = 'High spoof probability — likely synthetic or cloned voice.';
         }
     }
-    
-    // Lip-Sync Analysis
-    const hasLipsync = lipsync.score !== null && lipsync.score !== undefined;
-    const lipsyncScore = hasLipsync ? Math.round(lipsync.score * 100) : null;
+
+    // Lip-Sync Analysis — hide the whole card when there's no audio track to sync against,
+    // rather than showing a permanently N/A section.
+    const hasLipsync = lipsync.lipsync_score !== null && lipsync.lipsync_score !== undefined;
+    const lipsyncCard = document.getElementById('lipsyncCard');
+    if (lipsyncCard) lipsyncCard.style.display = hasLipsync ? '' : 'none';
+    if (!hasLipsync) return;
+
+    const lipsyncScore = Math.round(lipsync.lipsync_score * 100);
     const lipsyncBar = document.getElementById('lipsyncScoreBar');
     const lipsyncText = document.getElementById('lipsyncScoreText');
     if (lipsyncBar) {
-        if (hasLipsync) {
-            lipsyncBar.style.width = `${lipsyncScore}%`;
-            lipsyncBar.className = `score-fill ${lipsyncScore < 30 ? 'safe' : lipsyncScore < 70 ? 'warning' : 'danger'}`;
-        } else {
-            lipsyncBar.style.width = `0%`;
-            lipsyncBar.className = `score-fill disabled`;
-        }
+        lipsyncBar.style.width = `${lipsyncScore}%`;
+        lipsyncBar.className = `score-fill ${lipsyncScore < 30 ? 'safe' : lipsyncScore < 70 ? 'warning' : 'danger'}`;
     }
-    if (lipsyncText) lipsyncText.textContent = hasLipsync ? `${lipsyncScore}%` : 'N/A';
-    
+    if (lipsyncText) lipsyncText.textContent = `${lipsyncScore}%`;
+
     // Lip-Sync Confidence
     const lipsyncConf = document.getElementById('lipsyncConfidence');
     if (lipsyncConf) {
-        lipsyncConf.textContent = hasLipsync && lipsync.confidence != null ? 
-            `${Math.round(lipsync.confidence * 100)}%` : 'N/A';
+        lipsyncConf.textContent = lipsync.confidence != null ? `${Math.round(lipsync.confidence * 100)}%` : 'N/A';
     }
-    
+
     // Lip-Sync Details
-    setText('syncOffset', hasLipsync && lipsync.sync_offset_ms != null ? `${lipsync.sync_offset_ms}ms` : 'N/A');
-    
-    const corrVal = lipsync.correlation !== undefined ? lipsync.correlation : lipsync.correlation_score;
-    setText('correlation', hasLipsync && corrVal != null ? 
-        `${(corrVal * 100).toFixed(1)}%` : 'N/A');
-    setText('phonemeAccuracy', hasLipsync && lipsync.phoneme_accuracy != null ?
-        `${Math.round(lipsync.phoneme_accuracy * 100)}%` : 'N/A');
-    setText('visemeMatch', hasLipsync && lipsync.viseme_match_rate != null ?
-        `${Math.round(lipsync.viseme_match_rate * 100)}%` : 'N/A');
-    
+    setText('syncOffset', lipsync.sync_offset_ms != null ? `${lipsync.sync_offset_ms}ms` : 'N/A');
+    setText('correlation', lipsync.correlation != null ? `${(lipsync.correlation * 100).toFixed(1)}%` : 'N/A');
+
     // Lip-Sync Description
     const lipsyncDesc = document.getElementById('lipsyncDescription');
     if (lipsyncDesc) {
-        if (!hasLipsync) {
-            lipsyncDesc.textContent = 'Lip-sync analysis not applicable (requires video with audio and visible faces).';
-        } else if (lipsyncScore < 30) {
+        if (lipsyncScore < 30) {
             lipsyncDesc.textContent = 'Audio-visual synchronization within normal parameters.';
         } else if (lipsyncScore < 70) {
-            lipsyncDesc.textContent = `Sync offset of ${lipsync.sync_offset_ms || 'N/A'}ms detected. May indicate dubbing.`;
+            lipsyncDesc.textContent = `Sync offset of ${lipsync.sync_offset_ms ?? 'N/A'}ms detected. May indicate dubbing.`;
         } else {
-            lipsyncDesc.textContent = `Severe desync detected (${lipsync.sync_offset_ms || 'N/A'}ms). Lip movement doesn't match audio.`;
+            lipsyncDesc.textContent = `Severe desync detected (${lipsync.sync_offset_ms ?? 'N/A'}ms). Lip movement doesn't match audio.`;
         }
     }
-    
-    // Artifacts Detection
-    updateArtifact('artifactBoundary', !artifacts.boundary_artifacts);
-    updateArtifact('artifactTemporal', !artifacts.temporal_inconsistency);
-    
-    // New Artifacts
-    const freq = results.frequency_analysis || {};
-    updateArtifact('artifactGan', !freq.gan_fingerprint_detected);
-    updateArtifact('artifactSpectrum', freq.spectrum_consistency !== 'ABNORMAL');
-
-    // Media Quality Card
-    const quality = results.media_quality || {};
-    setText('qualityScore', quality.overall_quality_score ? `${quality.overall_quality_score}/100` : '--');
-    
-    const blur = quality.blur_detection || {};
-    const noise = quality.noise_level || {};
-    const compression = quality.compression_analysis || {};
-    
-    setText('blurStatus', blur.is_blurry ? `Detected (${blur.blur_score})` : 'Clear');
-    setText('noiseLevel', noise.snr_db ? `${noise.snr_db} dB` : '--');
-    setText('compressionStatus', compression.double_compression_detected ? 'Double Compression' : 'Single Pass');
-    setText('integrityStatus', metadata.file_hash ? 'Verified' : '--');
-
-    // Technical Summary & Container Forensics
-    const container = results.container_analysis || {};
-    
-    setText('modelsUsed', techSummary.models_used?.length ? 
-        techSummary.models_used.length + ' models' : '--');
-    
-    setText('containerStatus', container.metadata_consistency || '--');
-    setText('toolFingerprints', container.tool_fingerprints?.join(', ') || 'None detected');
-    
-    setText('mediaResolution', metadata.resolution || '--');
-    setText('mediaCodec', metadata.codec || '--');
-    setText('dateMismatch', container.modification_date_mismatch ? '⚠️ Mismatch' : 'Consistent');
 }
 
 // Helper to safely set text content
