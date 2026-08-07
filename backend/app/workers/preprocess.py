@@ -255,7 +255,7 @@ def run_preprocessing_pipeline(self, job_id: str):
     """
     try:
         # Validate
-        validation = validate_media.apply(args=[job_id]).get()
+        validation = validate_media.apply(args=[job_id]).get(disable_sync_subtasks=False)
         
         file_path = validation["file_path"]
         media_type = validation["media_type"]
@@ -264,18 +264,18 @@ def run_preprocessing_pipeline(self, job_id: str):
         
         if media_type == "video":
             # Extract frames
-            frames_result = extract_frames.apply(args=[job_id, file_path]).get()
+            frames_result = extract_frames.apply(args=[job_id, file_path]).get(disable_sync_subtasks=False)
             results["frames"] = frames_result
             
             # Extract audio (may return has_audio=False if no audio track)
-            audio_result = extract_audio.apply(args=[job_id, file_path]).get()
+            audio_result = extract_audio.apply(args=[job_id, file_path]).get(disable_sync_subtasks=False)
             results["audio"] = audio_result
             
             # Only transcribe if audio was actually found
             if audio_result.get("has_audio") and audio_result.get("audio_path"):
                 transcript_result = transcribe_audio.apply(
                     args=[job_id, audio_result["audio_path"]]
-                ).get()
+                ).get(disable_sync_subtasks=False)
                 results["transcript"] = transcript_result["transcript"]
             else:
                 results["transcript"] = {"full_text": "", "words": []}
@@ -283,7 +283,7 @@ def run_preprocessing_pipeline(self, job_id: str):
         elif media_type == "audio":
             # Audio-only: transcribe directly
             results["audio"] = {"audio_path": file_path, "has_audio": True}
-            transcript_result = transcribe_audio.apply(args=[job_id, file_path]).get()
+            transcript_result = transcribe_audio.apply(args=[job_id, file_path]).get(disable_sync_subtasks=False)
             results["transcript"] = transcript_result["transcript"]
             results["frames"] = {"frames": [], "frame_count": 0}
             
@@ -298,7 +298,7 @@ def run_preprocessing_pipeline(self, job_id: str):
             
         else:
             # Unknown media type — try video processing
-            frames_result = extract_frames.apply(args=[job_id, file_path]).get()
+            frames_result = extract_frames.apply(args=[job_id, file_path]).get(disable_sync_subtasks=False)
             results["frames"] = frames_result
             results["audio"] = {"audio_path": None, "has_audio": False}
             results["transcript"] = {"full_text": "", "words": []}

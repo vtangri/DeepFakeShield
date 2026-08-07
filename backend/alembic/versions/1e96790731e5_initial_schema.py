@@ -28,8 +28,8 @@ def upgrade() -> None:
     sa.Column('is_active', sa.Boolean(), nullable=True),
     sa.Column('is_superuser', sa.Boolean(), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_users'))
     )
     with op.batch_alter_table('users', schema=None) as batch_op:
@@ -44,8 +44,8 @@ def upgrade() -> None:
     sa.Column('ip_address', sa.String(length=50), nullable=True),
     sa.Column('user_agent', sa.String(length=500), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], name=op.f('fk_audit_logs_user_id_users'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_audit_logs'))
     )
@@ -64,10 +64,10 @@ def upgrade() -> None:
     sa.Column('storage_path', sa.String(length=500), nullable=False),
     sa.Column('thumbnail_path', sa.String(length=500), nullable=True),
     sa.Column('meta_info', sa.JSON(), nullable=True),
-    sa.Column('expires_at', sa.DateTime(), nullable=True),
+    sa.Column('expires_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], name=op.f('fk_media_items_user_id_users'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_media_items')),
     sa.UniqueConstraint('sha256', 'user_id', name='uq_media_sha256_user')
@@ -86,12 +86,12 @@ def upgrade() -> None:
     sa.Column('results', sa.JSON(), nullable=True),
     sa.Column('overall_score', sa.Float(), nullable=True),
     sa.Column('label', sa.String(length=50), nullable=True),
-    sa.Column('started_at', sa.DateTime(), nullable=True),
-    sa.Column('completed_at', sa.DateTime(), nullable=True),
+    sa.Column('started_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('celery_task_id', sa.String(length=255), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['media_id'], ['media_items.id'], name=op.f('fk_analysis_jobs_media_id_media_items'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_analysis_jobs'))
     )
@@ -107,8 +107,8 @@ def upgrade() -> None:
     sa.Column('storage_path', sa.String(length=500), nullable=False),
     sa.Column('meta_info', sa.JSON(), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['job_id'], ['analysis_jobs.id'], name=op.f('fk_evidence_artifacts_job_id_analysis_jobs'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_evidence_artifacts'))
     )
@@ -123,8 +123,8 @@ def upgrade() -> None:
     sa.Column('score', sa.Float(), nullable=True),
     sa.Column('inference_time_ms', sa.Integer(), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['job_id'], ['analysis_jobs.id'], name=op.f('fk_model_runs_job_id_analysis_jobs'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_model_runs'))
     )
@@ -138,10 +138,10 @@ def upgrade() -> None:
     sa.Column('pdf_path', sa.String(length=500), nullable=True),
     sa.Column('json_path', sa.String(length=500), nullable=True),
     sa.Column('llm_model_used', sa.String(length=100), nullable=True),
-    sa.Column('generated_at', sa.DateTime(), nullable=True),
+    sa.Column('generated_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['job_id'], ['analysis_jobs.id'], name=op.f('fk_reports_job_id_analysis_jobs'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_reports'))
     )
@@ -157,8 +157,8 @@ def upgrade() -> None:
     sa.Column('reason', sa.String(length=255), nullable=False),
     sa.Column('meta_info', sa.JSON(), nullable=True),
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['job_id'], ['analysis_jobs.id'], name=op.f('fk_segments_job_id_analysis_jobs'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_segments'))
     )

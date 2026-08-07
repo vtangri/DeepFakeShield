@@ -406,22 +406,22 @@ def run_inference_pipeline(self, preprocess_results: Dict, job_id: str):
         # Run video inference
         video_result = run_video_inference.apply(
             args=[job_id, frames_data]
-        ).get()
+        ).get(disable_sync_subtasks=False)
 
         # Run audio inference (passes audio metadata for has_audio check)
         audio_result = run_audio_inference.apply(
             args=[job_id, audio_data]
-        ).get()
+        ).get(disable_sync_subtasks=False)
 
         # Run lip-sync inference (passes both audio and frame data)
         lipsync_result = run_lipsync_inference.apply(
             args=[job_id, frames_data, audio_data, transcript]
-        ).get()
+        ).get(disable_sync_subtasks=False)
 
         # Run fusion
         fusion_result = run_fusion.apply(
             args=[job_id, video_result, audio_result, lipsync_result]
-        ).get()
+        ).get(disable_sync_subtasks=False)
 
         return fusion_result
 

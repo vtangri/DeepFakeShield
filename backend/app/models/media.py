@@ -35,7 +35,7 @@ class MediaItem(Base):
     meta_info = Column(JSON, default=dict)
     
     # Retention
-    expires_at = Column(DateTime, nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
     
     __table_args__ = (
         UniqueConstraint('sha256', 'user_id', name='uq_media_sha256_user'),

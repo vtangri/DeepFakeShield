@@ -32,12 +32,18 @@ class Base(DeclarativeBase):
     
     # Common columns for all models
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    # timezone=True is required: the defaults below are tz-aware, and asyncpg
+    # refuses to bind an aware datetime to a naive TIMESTAMP column.
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
     updated_at = Column(
-        DateTime, 
-        default=lambda: datetime.now(timezone.utc), 
-        onupdate=lambda: datetime.now(timezone.utc), 
-        nullable=False
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
     )
     
     def dict(self) -> dict[str, Any]:
