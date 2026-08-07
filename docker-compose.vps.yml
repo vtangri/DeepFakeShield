@@ -37,8 +37,8 @@ services:
   # ────────────────────────────────────────────────────────────
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile.vps
+      context: .
+      dockerfile: backend/Dockerfile.vps
     image: ${BACKEND_IMAGE:-deepfakeshield-backend:latest}
     container_name: dfs-backend
     env_file:
