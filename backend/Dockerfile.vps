@@ -16,7 +16,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 
 # Install Python dependencies
 COPY backend/requirements.txt .
-RUN pip install --no-cache-dir gunicorn \
+RUN pip install --no-cache-dir "setuptools<70" wheel gunicorn \
     && pip install --no-cache-dir -r requirements.txt
 
 # ──────────────────────────────────────────────────────────────
