@@ -3,7 +3,7 @@ Report generation and export routes.
 """
 from uuid import UUID
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse, JSONResponse
@@ -59,7 +59,7 @@ async def generate_report(
     if not report:
         report = Report(
             job_id=job_id,
-            generated_at=datetime.utcnow()
+            generated_at=datetime.now(timezone.utc)
         )
         db.add(report)
         
@@ -79,7 +79,7 @@ async def generate_report(
     full_report = _generate_placeholder_full_report(job)
     full_report["report_text"] = report.summary
     report.full_report = full_report
-    report.generated_at = datetime.utcnow()
+    report.generated_at = datetime.now(timezone.utc)
     
     await db.commit()
     await db.refresh(report)
@@ -182,7 +182,7 @@ async def get_report_pdf(
         # Create new report
         report = Report(
             job_id=job_id,
-            generated_at=datetime.utcnow(),
+            generated_at=datetime.now(timezone.utc),
             summary=_generate_placeholder_summary(job),
             full_report=_generate_placeholder_full_report(job)
         )

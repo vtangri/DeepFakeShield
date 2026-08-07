@@ -29,8 +29,8 @@ class AnalysisJob(Base):
     label = Column(String(50), nullable=True)  # AUTHENTIC, LIKELY_FAKE, FAKE
     
     # Timing
-    started_at = Column(DateTime, nullable=True)
-    completed_at = Column(DateTime, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
     
     # Celery task ID
     celery_task_id = Column(String(255), nullable=True)

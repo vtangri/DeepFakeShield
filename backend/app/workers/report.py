@@ -3,7 +3,7 @@ Report generation Celery worker tasks.
 """
 from pathlib import Path
 from typing import Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 
 from celery import shared_task
@@ -155,7 +155,7 @@ def _generate_fallback_report(results: Dict[str, Any]) -> str:
     return report
 
 
-@celery_app.task(bind=True, queue="default", max_retries=3)
+@celery_app.task(bind=True, queue="preprocess", max_retries=3)
 def generate_report(self, fusion_results: Dict[str, Any], job_id: str) -> Dict[str, Any]:
     """Generate the final forensic report."""
     try:
@@ -194,7 +194,7 @@ def generate_report(self, fusion_results: Dict[str, Any], job_id: str) -> Dict[s
             
             report.summary = report_text
             report.full_report = full_report
-            report.generated_at = datetime.utcnow()
+            report.generated_at = datetime.now(timezone.utc)
             report.llm_model_used = settings.LLM_MODEL if settings.OPENAI_API_KEY else "fallback"
             
             db.commit()
@@ -213,12 +213,10 @@ def generate_report(self, fusion_results: Dict[str, Any], job_id: str) -> Dict[s
         raise
 
 
-@celery_app.task(bind=True, queue="default")
+@celery_app.task(bind=True, queue="preprocess")
 def finalize_job(self, report_result: Dict[str, Any], job_id: str) -> Dict[str, Any]:
     """Finalize the analysis job."""
     try:
-        from datetime import datetime
-        
         db = SessionLocal()
         try:
             job = db.query(AnalysisJob).filter(AnalysisJob.id == job_id).first()
@@ -226,7 +224,7 @@ def finalize_job(self, report_result: Dict[str, Any], job_id: str) -> Dict[str, 
                 job.status = TaskState.DONE
                 job.stage = TaskState.DONE
                 job.progress = 1.0
-                job.completed_at = datetime.utcnow()
+                job.completed_at = datetime.now(timezone.utc)
                 db.commit()
         finally:
             db.close()
@@ -241,7 +239,7 @@ def finalize_job(self, report_result: Dict[str, Any], job_id: str) -> Dict[str, 
         raise
 
 
-@celery_app.task(bind=True, queue="default")
+@celery_app.task(bind=True, queue="preprocess")
 def run_full_pipeline(self, job_id: str):
     """Run the complete analysis pipeline using a Celery canvas chain (non-blocking)."""
     from app.workers.preprocess import run_preprocessing_pipeline

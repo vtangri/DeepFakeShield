@@ -50,7 +50,7 @@ class Report(Base):
     llm_model_used = Column(String(100), nullable=True)
     
     # Generation time
-    generated_at = Column(DateTime, nullable=True)
+    generated_at = Column(DateTime(timezone=True), nullable=True)
     
     # Relationships
     analysis_job = relationship("AnalysisJob", back_populates="report")
