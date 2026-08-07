@@ -412,6 +412,44 @@ To eliminate blocking calls, DeepFakeShield incorporates **Celery** with **Redis
 2. A dedicated Celery worker pulls the task from the Redis queue, initializes model pipelines, extracts frames via OpenCV, and executes model evaluations.
 3. Upon task completion, Celery updates the database record (`status="COMPLETED"`, populating `video_results`, `audio_results`, `lipsync_results`, `fusion_results`) and generates the forensic PDF report.
 
+#### 5.4.1 End-to-End Real-Time Analysis Pipeline Workflow
+
+The system transparently displays live activity progress across five distinct execution stages (monitored asynchronously via API status polling):
+
+```mermaid
+graph TD
+    A[1. File Validation Stage] -->|SHA-256 Hash & FFmpeg Probing| B[2. Frame & Audio Stream Extraction]
+    B -->|FFmpeg Probing: Has Audio?| C{Audio Stream Present?}
+    C -->|Yes| D[3. Whisper ASR Transcription]
+    C -->|No: FFmpeg Verified| E[Skip Audio & Lip-Sync Tasks]
+    D --> F[4. AI Multi-Model Deep Analysis]
+    E --> F
+    F -->|ViT + AudioSpoofCNN + LipSync| G[5. Multimodal Fusion & Report Generation]
+```
+
+1. **Stage 1: File Validation (`TaskState.VALIDATING`):**
+   - **Integrity Verification:** Computes SHA-256 hash to verify asset integrity against corruption or mid-transit tampering.
+   - **Metadata Probing:** Runs `ffprobe` to inspect container codec parameters, resolution, aspect ratio, frame rate, and stream indexes.
+   - **Validation Rules:** Enforces client-side 100MB file size limits and video format restriction (`.mp4`, `.mov`, `.avi`, `.mkv`, `.webm`).
+
+2. **Stage 2: Frame & Audio Stream Extraction (`TaskState.EXTRACTING`):**
+   - **Video Keyframe Extraction:** OpenCV extracts RGB video frames at $5\text{ FPS}$. Facial regions are localized via OpenCV Haar Cascades and cropped with a $20\%$ bounding margin to capture face-swap boundary seams on the neck and hairline.
+   - **FFmpeg Audio Probing & Extraction:** Runs `ffprobe` to detect audio stream presence. If present, FFmpeg extracts a 16kHz mono PCM WAV audio file (`audio_<job_id>.wav`). If no audio stream is detected by FFmpeg, the worker sets `has_audio = False` cleanly.
+
+3. **Stage 3: Audio Transcription (`TaskState.TRANSCRIBING`):**
+   - When an audio stream is present, Whisper ASR generates word-level timestamps and phoneme text strings.
+   - If `has_audio = False`, this stage completes instantaneously with an empty transcript, allowing downstream tasks to adapt dynamically.
+
+4. **Stage 4: AI Deep Multi-Model Analysis (`TaskState.INFER_VIDEO`, `INFER_AUDIO`, `LIPSYNC`):**
+   - **Vision Transformer Engine (`video_forensics.py`):** Passes $224\times 224$ face crops through ViT-B/16 self-attention heads to detect spatial boundary artifacts and GAN blending seams.
+   - **Audio Spoof Engine (`audio_spoof.py`):** Converts PCM WAV audio into STFT 2D spectrograms, computing AudioSpoofCNN features, MFCC spectral anomalies, and Wiener entropy. (Skipped cleanly if `has_audio = False`).
+   - **Lip-Sync Engine (`lipsync.py`):** Computes cross-correlation between mouth ROI bounding-box openness over time and audio RMS amplitude envelopes. (Skipped cleanly if `has_audio = False`).
+
+5. **Stage 5: Multimodal Fusion & Report Generation (`TaskState.FUSION`, `TaskState.REPORTING`):**
+   - **Dynamic Weight Recalibration:** Recalibrates modality weights ($W_V=0.45, W_A=0.30, W_L=0.25$ for full video+audio vs. $W_V=1.00$ for audio-less video).
+   - **Evidence Timeline Compilation:** Aggregates flagged frames and segment timestamps ($S_m > 0.60$).
+   - **Report PDF Generation:** Generates a cryptographic PDF report containing SHA-256 signatures, confidence dials, and forensic breakdown cards.
+
 ---
 
 ### 5.5 Production DevOps Suite, Containerization & Server Security
