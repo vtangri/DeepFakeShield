@@ -1,7 +1,9 @@
 """
 Pytest configuration and fixtures.
 """
+import asyncio
 import pytest
+import pytest_asyncio
 import os
 import tempfile
 from pathlib import Path
@@ -17,6 +19,15 @@ from app.db.session import async_engine, AsyncSessionLocal
 from app.db.base import Base
 # Import all models to ensure they are registered with Base.metadata
 from app.models import User, MediaItem, AnalysisJob, Segment, ModelRun, EvidenceArtifact, Report, AuditLog
+
+
+@pytest.fixture(scope="session")
+def event_loop():
+    """Session-scoped event loop — pytest-asyncio 0.21's default is function-scoped,
+    which conflicts with the session-scoped init_db fixture below."""
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
 
 
 @pytest.fixture(scope="session")
@@ -84,7 +95,7 @@ def sample_frames(temp_storage):
     return frames_dir
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest_asyncio.fixture(scope="session", autouse=True)
 async def init_db():
     """Initialize test database."""
     async with async_engine.begin() as conn:
@@ -97,7 +108,7 @@ async def init_db():
         await conn.run_sync(Base.metadata.drop_all)
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def db_session():
     """Get async db session."""
     async with AsyncSessionLocal() as session:
