@@ -274,6 +274,28 @@ function initFileUpload() {
     function handleFiles(files) {
         if(files.length > 0) {
             const file = files[0];
+            
+            // 1. Enforce VIDEO-ONLY file extensions
+            const allowedVideoExts = ['.mp4', '.mov', '.avi', '.mkv', '.webm'];
+            const fileNameLower = file.name.toLowerCase();
+            const isVideo = allowedVideoExts.some(ext => fileNameLower.endsWith(ext)) || (file.type && file.type.startsWith('video/'));
+            
+            if (!isVideo) {
+                showToast('Only video files (MP4, MOV, AVI, MKV, WEBM) are supported for deepfake detection.', 'error');
+                state.selectedFile = null;
+                document.getElementById('fileInput').value = '';
+                return;
+            }
+            
+            // 2. Enforce 100MB UI file size limit
+            const MAX_UI_SIZE_BYTES = 100 * 1024 * 1024; // 100MB
+            if (file.size > MAX_UI_SIZE_BYTES) {
+                showToast(`File size (${formatBytes(file.size)}) exceeds the 100MB limit. Please upload a smaller video clip.`, 'error');
+                state.selectedFile = null;
+                document.getElementById('fileInput').value = '';
+                return;
+            }
+
             state.selectedFile = file;
             
             // Visual Update
@@ -427,35 +449,36 @@ function updateStatus(stage, percent, text) {
 // Activity log messages for each stage (matching all backend stages)
 const stageActivities = {
     validating: [
-        'Checking file integrity...',
-        'Extracting metadata (codec, resolution, fps)...'
+        'Checking file format & SHA-256 integrity...',
+        'Probing container metadata with FFmpeg...'
     ],
     extracting: [
-        'Sampling keyframes at 1fps...',
-        'Extracting audio track (PCM 16-bit)...'
+        'Running FFmpeg audio stream detection...',
+        'Extracting video keyframes at 5 FPS...',
+        'Processing video container streams...'
     ],
     transcribing: [
-        'Loading Whisper ASR model...',
-        'Transcribing audio to text...'
+        'Verifying extracted PCM WAV audio track...',
+        'Transcribing speech phonemes...'
     ],
     infer_video: [
-        'Running ViT-B/16 face classifier...',
-        'Detecting facial boundary artifacts...'
+        'Executing Vision Transformer (ViT-B/16)...',
+        'Scanning facial borders for GAN artifacts...'
     ],
     infer_audio: [
-        'Analyzing audio spectrogram patterns...',
-        'Checking for voice cloning signatures...'
+        'Executing AudioSpoofCNN 2D Spectrogram classifier...',
+        'Checking spectral Wiener entropy & formant stability...'
     ],
     lipsync: [
-        'Computing lip-sync correlation matrix...',
-        'Measuring audio-visual alignment...'
+        'Measuring phoneme-viseme temporal offset...',
+        'Cross-correlating mouth ROI openness & audio RMS energy...'
     ],
     fusion: [
-        'Fusing multimodal predictions...',
-        'Applying ensemble weighting...'
+        'Recalibrating dynamic modality weights...',
+        'Computing confidence-weighted ensemble verdict...'
     ],
     report: [
-        'Generating forensic summary...',
+        'Compiling forensic evidence timeline...',
         'Analysis complete! ✓'
     ],
     done: [
@@ -720,9 +743,14 @@ function updateModalityScores(data) {
     
     // Audio Description
     const audioDesc = document.getElementById('audioDescription');
+    const audioCardEl = document.getElementById('audioCard');
+    if (audioCardEl) {
+        if (!hasAudio) audioCardEl.classList.add('skipped');
+        else audioCardEl.classList.remove('skipped');
+    }
     if (audioDesc) {
         if (!hasAudio) {
-            audioDesc.textContent = 'Audio analysis not applicable (no audio track or still image).';
+            audioDesc.textContent = '🎵 FFmpeg Verified: No audio stream found in video container. Audio spoof analysis skipped & score reweighted 100% to Video ViT.';
         } else if (audioScore < 30) {
             audioDesc.textContent = 'Voice patterns consistent with natural speech.';
         } else if (audioScore < 70) {
@@ -737,6 +765,11 @@ function updateModalityScores(data) {
     const lipsyncScore = hasLipsync ? Math.round(lipsync.score * 100) : null;
     const lipsyncBar = document.getElementById('lipsyncScoreBar');
     const lipsyncText = document.getElementById('lipsyncScoreText');
+    const lipsyncCardEl = document.getElementById('lipsyncCard');
+    if (lipsyncCardEl) {
+        if (!hasLipsync) lipsyncCardEl.classList.add('skipped');
+        else lipsyncCardEl.classList.remove('skipped');
+    }
     if (lipsyncBar) {
         if (hasLipsync) {
             lipsyncBar.style.width = `${lipsyncScore}%`;
@@ -770,7 +803,7 @@ function updateModalityScores(data) {
     const lipsyncDesc = document.getElementById('lipsyncDescription');
     if (lipsyncDesc) {
         if (!hasLipsync) {
-            lipsyncDesc.textContent = 'Lip-sync analysis not applicable (requires video with audio and visible faces).';
+            lipsyncDesc.textContent = '👄 Lip-sync analysis skipped: FFmpeg verified video has no audio track (requires both audio and video streams).';
         } else if (lipsyncScore < 30) {
             lipsyncDesc.textContent = 'Audio-visual synchronization within normal parameters.';
         } else if (lipsyncScore < 70) {

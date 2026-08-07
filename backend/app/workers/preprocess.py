@@ -127,10 +127,11 @@ def extract_frames(self, job_id: str, file_path: str, fps: int = 5) -> Dict[str,
 
 @celery_app.task(bind=True, queue="preprocess", max_retries=3)
 def extract_audio(self, job_id: str, file_path: str) -> Dict[str, Any]:
-    """Extract audio track from video/audio file.
+    """Extract audio track from video file using ffprobe and ffmpeg.
     
-    Returns has_audio=False if the media has no audio track, instead of
-    failing. This allows downstream tasks to skip audio analysis.
+    Uses ffprobe to inspect container streams first. Returns has_audio=False if
+    the media has no audio track or empty audio stream, allowing downstream ML
+    tasks (audio spoof detection & lip-sync) to skip analysis cleanly.
     """
     try:
         update_job_status(job_id, TaskState.EXTRACTING, 0.5)
@@ -138,7 +139,40 @@ def extract_audio(self, job_id: str, file_path: str) -> Dict[str, Any]:
         file_path = Path(file_path)
         audio_path = file_path.parent / f"audio_{job_id}.wav"
         
-        # Use ffmpeg to extract audio
+        # Step 1: Use ffprobe to detect if audio stream exists in video container
+        has_audio_stream = False
+        ffprobe_cmd = [
+            "ffprobe", "-v", "error",
+            "-select_streams", "a",
+            "-show_entries", "stream=codec_name,channels,sample_rate",
+            "-of", "json",
+            str(file_path)
+        ]
+        
+        try:
+            probe_result = subprocess.run(ffprobe_cmd, capture_output=True, text=True, timeout=10)
+            if probe_result.returncode == 0 and probe_result.stdout:
+                import json
+                probe_data = json.loads(probe_result.stdout)
+                streams = probe_data.get("streams", [])
+                if len(streams) > 0 and streams[0].get("channels", 0) > 0:
+                    has_audio_stream = True
+        except Exception as probe_err:
+            # Fallback to direct ffmpeg extraction if ffprobe is unavailable
+            has_audio_stream = True
+
+        if not has_audio_stream:
+            # No audio stream in video — return has_audio=False cleanly
+            update_job_status(job_id, TaskState.EXTRACTING, 1.0)
+            return {
+                "job_id": job_id,
+                "audio_path": None,
+                "has_audio": False,
+                "ffmpeg_verified": True,
+                "note": "FFmpeg verification: No audio stream detected in video container",
+            }
+
+        # Step 2: Extract PCM WAV audio track using ffmpeg
         cmd = [
             "ffmpeg", "-y",
             "-i", str(file_path),
@@ -149,24 +183,23 @@ def extract_audio(self, job_id: str, file_path: str) -> Dict[str, Any]:
             str(audio_path)
         ]
         
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         
-        # Check if audio was actually extracted
-        # ffmpeg may succeed but produce an empty/tiny file if no audio track exists
+        # Check if audio was actually extracted (> 1KB file size)
         has_audio = (
             result.returncode == 0
             and audio_path.exists()
-            and audio_path.stat().st_size > 1000  # > 1KB means real audio data
+            and audio_path.stat().st_size > 1000
         )
         
         if not has_audio:
-            # No audio track in this media — this is NOT an error
             update_job_status(job_id, TaskState.EXTRACTING, 1.0)
             return {
                 "job_id": job_id,
                 "audio_path": None,
                 "has_audio": False,
-                "note": "No audio track detected in media file",
+                "ffmpeg_verified": True,
+                "note": "FFmpeg verification: Audio stream is silent or empty",
             }
         
         update_job_status(job_id, TaskState.EXTRACTING, 1.0)
@@ -175,16 +208,18 @@ def extract_audio(self, job_id: str, file_path: str) -> Dict[str, Any]:
             "job_id": job_id,
             "audio_path": str(audio_path),
             "has_audio": True,
+            "ffmpeg_verified": True,
+            "note": "FFmpeg verification: Audio stream detected & extracted successfully",
         }
         
     except Exception as e:
-        # ffmpeg failure is not fatal — just means no audio analysis
         update_job_status(job_id, TaskState.EXTRACTING, 1.0)
         return {
             "job_id": job_id,
             "audio_path": None,
             "has_audio": False,
-            "note": f"Audio extraction failed: {str(e)}",
+            "ffmpeg_verified": False,
+            "note": f"Audio extraction error: {str(e)}",
         }
 
 
