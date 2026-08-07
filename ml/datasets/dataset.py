@@ -203,17 +203,25 @@ def create_data_loaders(
     batch_size: int = 32,
     num_workers: int = 4,
     modality: str = "video",
+    transform=None,
 ) -> Tuple[DataLoader, DataLoader, DataLoader]:
-    """Create train, validation, and test data loaders."""
-    
+    """Create train, validation, and test data loaders.
+
+    `transform` must match what inference applies (ImageNet normalisation for
+    video); without it the model trains on [0,1] pixels but is served
+    normalised inputs, so scores are meaningless.
+    """
+
     if modality == "video":
         DatasetClass = DeepfakeVideoDataset
+        extra = {"transform": transform}
     else:
         DatasetClass = DeepfakeAudioDataset
-    
-    train_dataset = DatasetClass(data_dir, split="train")
-    val_dataset = DatasetClass(data_dir, split="val")
-    test_dataset = DatasetClass(data_dir, split="test")
+        extra = {}  # audio has no image transform
+
+    train_dataset = DatasetClass(data_dir, split="train", **extra)
+    val_dataset = DatasetClass(data_dir, split="val", **extra)
+    test_dataset = DatasetClass(data_dir, split="test", **extra)
     
     train_loader = DataLoader(
         train_dataset,

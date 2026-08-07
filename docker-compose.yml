@@ -47,6 +47,7 @@ services:
       - STORAGE_PATH=/app/storage
     volumes:
       - ./backend:/app
+      - ./ml:/app/ml
       - ./ml/models:/app/ml_models
       - storage_data:/app/storage
     ports:
@@ -72,6 +73,7 @@ services:
       - STORAGE_PATH=/app/storage
     volumes:
       - ./backend:/app
+      - ./ml:/app/ml
       - ./ml/models:/app/ml_models
       - storage_data:/app/storage
     depends_on:
@@ -96,6 +98,7 @@ services:
       - ML_MODELS_PATH=/app/ml_models
     volumes:
       - ./backend:/app
+      - ./ml:/app/ml
       - ./ml/models:/app/ml_models
       - storage_data:/app/storage
     depends_on:

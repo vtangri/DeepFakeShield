@@ -146,9 +146,10 @@ def main():
     ])
     
     train_loader, val_loader, test_loader = create_data_loaders(
-        args.data_dir, 
+        args.data_dir,
         batch_size=args.batch_size,
-        modality="video"
+        modality="video",
+        transform=transform,
     )
     
     print(f"Training samples: {len(train_loader.dataset)}")

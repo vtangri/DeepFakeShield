@@ -36,9 +36,9 @@ ffmpeg-python==0.2.0
 Pillow==10.1.0
 
 # ML Inference
-torch==2.1.0
-torchvision==0.16.0
-torchaudio==2.1.0
+torch==2.2.2
+torchvision==0.17.2
+torchaudio==2.2.2
 transformers==4.35.2
 timm==0.9.12
 openai-whisper==20231117
