@@ -403,25 +403,11 @@ def run_inference_pipeline(self, preprocess_results: Dict, job_id: str):
         audio_data = preprocess_results.get("audio", {})
         transcript = preprocess_results.get("transcript", {})
 
-        # Run video inference
-        video_result = run_video_inference.apply(
-            args=[job_id, frames_data]
-        ).get(disable_sync_subtasks=False)
-
-        # Run audio inference (passes audio metadata for has_audio check)
-        audio_result = run_audio_inference.apply(
-            args=[job_id, audio_data]
-        ).get(disable_sync_subtasks=False)
-
-        # Run lip-sync inference (passes both audio and frame data)
-        lipsync_result = run_lipsync_inference.apply(
-            args=[job_id, frames_data, audio_data, transcript]
-        ).get(disable_sync_subtasks=False)
-
-        # Run fusion
-        fusion_result = run_fusion.apply(
-            args=[job_id, video_result, audio_result, lipsync_result]
-        ).get(disable_sync_subtasks=False)
+        # Run inference steps sequentially in worker process (prevents Celery subtask queue deadlock)
+        video_result = run_video_inference.run(job_id, frames_data)
+        audio_result = run_audio_inference.run(job_id, audio_data)
+        lipsync_result = run_lipsync_inference.run(job_id, frames_data, audio_data, transcript)
+        fusion_result = run_fusion.run(job_id, video_result, audio_result, lipsync_result)
 
         return fusion_result
 
