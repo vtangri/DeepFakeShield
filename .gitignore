@@ -47,9 +47,14 @@ env/
 # macOS
 .DS_Store
 
-# Unpacked torch checkpoints (same weights as ml/models/, extracted by
-# torch.load inspection tooling) — 300MB+ of duplicate binaries.
-.DS_Store
+# Machine Learning Data, Unpacked Models, & Logs
+ml/data/
+models/
+ml/models/logs/
+*.kaggle-raw
+*.tfevents.*
+
+# Unpacked torch checkpoints & binary artifacts
 checkpoints/
 backend/ml/
 *.pt
